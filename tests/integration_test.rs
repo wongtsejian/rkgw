@@ -81,6 +81,9 @@ fn create_test_app_state() -> AppState {
         fake_reasoning_max_tokens: 4000,
         fake_reasoning_handling: FakeReasoningHandling::AsReasoningContent,
         dashboard: false,
+        tls_enabled: false,
+        tls_cert_path: None,
+        tls_key_path: None,
     });
 
     let metrics = Arc::new(MetricsCollector::new());

@@ -426,11 +426,11 @@ mod tests {
         let mut parser = ThinkingParser::new();
 
         // First chunk - start of thinking
-        let result1 = parser.feed("<thinking>First part");
+        let _result1 = parser.feed("<thinking>First part");
         assert_eq!(parser.state, ParserState::InThinking);
 
         // Second chunk - more thinking content
-        let result2 = parser.feed(" second part");
+        let _result2 = parser.feed(" second part");
         // Content may be buffered due to cautious sending
 
         // Third chunk - end of thinking
