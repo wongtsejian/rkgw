@@ -45,3 +45,6 @@ perf.data.old
 .security-key
 logs/security/
 
+# Claude Code
+.claude/
+
