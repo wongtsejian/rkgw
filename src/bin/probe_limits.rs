@@ -78,33 +78,42 @@ async fn main() -> Result<()> {
         }
     };
 
-    println!(
-        "{:<30} {:>16} {:>16}",
-        "Model", "Context (tokens)", "Output cap"
-    );
-    println!("{}", "-".repeat(66));
-
+    // Collect results first (progress goes to stderr), then print table to stdout
+    let mut results = Vec::new();
     for model in &models {
-        eprint!("  [{model}] probing context window...");
+        eprintln!("[{model}]");
+        eprint!("  context window: ");
         let context_limit = probe_context_window(&client, &gateway_url, &api_key, model).await;
-        eprint!(" done. probing output tokens...");
+        eprintln!();
+        eprint!("  output tokens:  ");
         let output_limit = probe_output_tokens(&client, &gateway_url, &api_key, model).await;
-        eprintln!(" done.");
+        eprintln!();
+        results.push((model, context_limit, output_limit));
+    }
 
+    eprintln!();
+    println!(
+        "{:<30} {:>18} {:>28}",
+        "Model", "Context (tokens)", "Max output tokens"
+    );
+    println!("{}", "-".repeat(78));
+
+    for (model, context_limit, output_limit) in &results {
         let ctx_str = match context_limit {
-            Ok(n) => format!("~{n}"),
+            Ok(n) => format!("~{}K", n / 1000),
             Err(e) => format!("err: {e}"),
         };
         let out_str = match output_limit {
-            Ok(Some(n)) => format!("~{n} (length)"),
-            Ok(None) => "model stops early".to_string(),
+            Ok(Some(n)) => format!("~{}K", n / 1000),
+            Ok(None) => "unknown (disable thinking, re-run)".to_string(),
             Err(e) => format!("err: {e}"),
         };
 
-        println!("{model:<30} {ctx_str:>16} {out_str:>16}");
+        println!("{model:<30} {ctx_str:>18} {out_str:>20}");
     }
 
-    println!("\nDone. Use context values for `contextLength` in your OpenCode provider config.");
+    println!("\nTip: use context values for `contextLength` in your OpenCode provider config.");
+    println!("     If output shows 'n/a', restart gateway with FAKE_REASONING=false and re-run.");
     Ok(())
 }
 
@@ -185,10 +194,19 @@ async fn probe_output_tokens(
     // First confirm finish=length is achievable at a small cap.
     // If the model stops early even at 200 tokens, it will stop early at any cap —
     // no point trying larger values.
+    eprint!(" [feasibility check]");
     let result = send_chat(client, base_url, api_key, model, OUTPUT_PROBE_PROMPT, 200).await?;
     if result.finish_reason.as_deref() != Some("length") {
+        // If completion_tokens >> max_tokens, thinking is consuming the budget
+        let thinking_likely = result.completion_tokens > 150;
+        if thinking_likely {
+            eprint!(" (thinking mode consuming budget — restart with FAKE_REASONING=false)");
+        } else {
+            eprint!(" (model stopped early — try a different prompt or disable thinking)");
+        }
         return Ok(None);
     }
+    eprint!("✓");
 
     // Binary search for the actual ceiling
     let mut lo: u64 = 200;
@@ -196,11 +214,14 @@ async fn probe_output_tokens(
     let mut last_good = lo;
 
     // Confirm hi fails (model is capped below hi)
+    eprint!(" [out:{hi}]");
     let hi_result = send_chat(client, base_url, api_key, model, OUTPUT_PROBE_PROMPT, hi).await?;
     if hi_result.finish_reason.as_deref() == Some("length") {
         // Still hitting length at 65536 — report that and stop
+        eprint!("✓ (at ceiling)");
         return Ok(Some(hi_result.completion_tokens));
     }
+    eprint!("✗");
 
     while hi - lo > 256 {
         let mid = (lo + hi) / 2;
