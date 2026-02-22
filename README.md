@@ -491,6 +491,53 @@ To use this gateway with the [Zed Editor](https://zed.dev/)'s ACP Claude Agent, 
 
 ---
 
+## 🚧 Known Limitations
+
+<details>
+<summary>View known limitations</summary>
+
+### Web Search in Claude Code
+
+Claude Code's built-in Web Search tool doesn't work through this proxy. The Kiro backend API doesn't support the `tool_use`/`tool_result` round-trip cycle that Claude Code's native tools rely on, so web search requests will fail.
+
+**Workaround: Use MCP servers instead**
+
+MCP (Model Context Protocol) tools run locally on your machine, so they bypass the proxy entirely. Add the following to your `~/.claude.json` under `"mcpServers"`:
+
+```json
+{
+  "mcpServers": {
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {},
+      "disabled": false,
+      "autoApprove": []
+    },
+    "exa": {
+      "command": "npx",
+      "args": ["-y", "exa-mcp-server"],
+      "env": {
+        "EXA_API_KEY": "your-exa-api-key"
+      },
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}
+```
+
+| MCP Server | Description |
+| --- | --- |
+| `mcp-server-fetch` | Fetches and extracts content from any URL |
+| `exa-mcp-server` | AI-powered web search via [Exa](https://exa.ai/) (requires an API key) |
+
+> 💡 After adding these, restart Claude Code to pick up the new MCP configuration.
+
+</details>
+
+---
+
 ## 🔧 Building
 
 ```bash
