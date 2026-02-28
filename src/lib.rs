@@ -11,11 +11,12 @@ pub mod models;
 pub mod resolver;
 pub mod routes;
 pub mod streaming;
-pub mod truncation;
 pub mod thinking_parser;
 pub mod tls;
 pub mod tokenizer;
+pub mod truncation;
 pub mod utils;
+pub mod web_ui;
 
 #[cfg(feature = "bench")]
 pub mod bench;

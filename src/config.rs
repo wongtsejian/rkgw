@@ -75,6 +75,14 @@ pub struct CliArgs {
     /// Path to TLS private key file (PEM format)
     #[arg(long, env = "TLS_KEY")]
     pub tls_key: Option<String>,
+
+    /// Enable web UI dashboard (served at /_ui/)
+    #[arg(long, env = "WEB_UI", default_value = "true")]
+    pub web_ui: bool,
+
+    /// Path to config database for web UI persistence
+    #[arg(long, env = "CONFIG_DB")]
+    pub config_db: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -123,6 +131,10 @@ pub struct Config {
     pub tls_enabled: bool,
     pub tls_cert_path: Option<PathBuf>,
     pub tls_key_path: Option<PathBuf>,
+
+    // Web UI
+    pub web_ui_enabled: bool,
+    pub config_db_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -229,6 +241,13 @@ impl Config {
             tls_enabled: args.tls,
             tls_cert_path: args.tls_cert.map(|s| expand_tilde(&s)),
             tls_key_path: args.tls_key.map(|s| expand_tilde(&s)),
+
+            // Web UI
+            web_ui_enabled: args.web_ui,
+            config_db_path: args
+                .config_db
+                .map(|s| expand_tilde(&s))
+                .or_else(|| dirs::home_dir().map(|h| h.join(".kiro-gateway").join("config.db"))),
         };
 
         Ok(config)
@@ -489,6 +508,8 @@ mod tests {
             tls_enabled,
             tls_cert_path: None,
             tls_key_path: None,
+            web_ui_enabled: false,
+            config_db_path: None,
         };
 
         (config, temp_file)

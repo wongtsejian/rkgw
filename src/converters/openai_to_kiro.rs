@@ -588,6 +588,8 @@ mod tests {
             tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
+            web_ui_enabled: false,
+            config_db_path: None,
         }
     }
 

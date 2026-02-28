@@ -17,10 +17,11 @@ mod resolver;
 mod routes;
 mod streaming;
 mod thinking_parser;
-mod truncation;
 mod tls;
 mod tokenizer;
+mod truncation;
 mod utils;
+mod web_ui;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -51,7 +52,7 @@ async fn main() -> Result<()> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(&log_level));
 
-    if config.dashboard {
+    if config.dashboard || config.web_ui_enabled {
         use tracing_subscriber::prelude::*;
 
         let dashboard_layer = dashboard::log_layer::DashboardLayer::new(Arc::clone(&log_buffer));
@@ -164,6 +165,32 @@ async fn main() -> Result<()> {
     let metrics = Arc::new(metrics::MetricsCollector::new());
     tracing::info!("✅ Metrics collector initialized");
 
+    // Open config database if web UI is enabled
+    let config_db = if config.web_ui_enabled {
+        if let Some(ref db_path) = config.config_db_path {
+            if let Some(parent) = db_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            match web_ui::config_db::ConfigDb::open(db_path) {
+                Ok(db) => {
+                    tracing::info!("✅ Config database opened: {}", db_path.display());
+                    Some(Arc::new(db))
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to open config database: {} (web UI config persistence disabled)",
+                        e
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let app_state = routes::AppState {
         proxy_api_key: config.proxy_api_key.clone(),
         model_cache: model_cache.clone(),
@@ -172,6 +199,8 @@ async fn main() -> Result<()> {
         resolver,
         config: Arc::new(config.clone()),
         metrics: Arc::clone(&metrics),
+        log_buffer: Arc::clone(&log_buffer),
+        config_db,
     };
 
     let app = build_app(app_state);
@@ -357,12 +386,25 @@ fn build_app(state: routes::AppState) -> axum::Router {
     // Anthropic API routes (with auth)
     let anthropic_routes = routes::anthropic_routes(state.clone());
 
+    // Web UI routes
+    let web_ui = if state.config.web_ui_enabled {
+        Some(web_ui::web_ui_routes(state.clone()))
+    } else {
+        None
+    };
+
     // Combine all routes
-    Router::new()
+    let mut router = Router::new()
         .merge(health_routes)
         .merge(openai_routes)
-        .merge(anthropic_routes)
-        // Apply middleware stack: CORS → Debug → HSTS → (Auth is per-route)
+        .merge(anthropic_routes);
+
+    if let Some(ui) = web_ui {
+        router = router.merge(ui);
+    }
+
+    router
+        // Apply middleware stack: CORS -> Debug -> HSTS -> (Auth is per-route)
         .layer(middleware::cors_layer())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -412,6 +454,17 @@ fn print_startup_banner(config: &config::Config) {
         },
         config.fake_reasoning_max_tokens
     );
+    if config.web_ui_enabled {
+        let protocol = if config.is_tls_active() {
+            "https"
+        } else {
+            "http"
+        };
+        println!(
+            "  Web UI:      {}://{}:{}/_ui/",
+            protocol, config.server_host, config.server_port
+        );
+    }
     println!();
 }
 

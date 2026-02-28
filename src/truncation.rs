@@ -197,12 +197,8 @@ impl TruncationState {
             hash,
             content.len()
         );
-        self.content_cache.insert(
-            hash.clone(),
-            ContentTruncationEntry {
-                content_hash: hash,
-            },
-        );
+        self.content_cache
+            .insert(hash.clone(), ContentTruncationEntry { content_hash: hash });
     }
 
     /// Get and remove truncation info for content (one-time retrieval).
@@ -300,11 +296,8 @@ pub fn inject_openai_truncation_recovery(messages: &mut Vec<Value>) {
                         .and_then(|c| c.as_str())
                         .unwrap_or("")
                         .to_string();
-                    let new_content = format!(
-                        "{}\n\n{}",
-                        truncation_tool_result_text(),
-                        existing_content
-                    );
+                    let new_content =
+                        format!("{}\n\n{}", truncation_tool_result_text(), existing_content);
                     msg["content"] = Value::String(new_content);
                     msg["is_error"] = Value::Bool(true);
                 }

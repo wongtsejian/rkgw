@@ -13,11 +13,16 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use uuid::Uuid;
 
+use std::collections::VecDeque;
+use std::sync::Mutex;
+use std::time::Instant;
+
 use crate::auth::AuthManager;
 use crate::cache::ModelCache;
 use crate::config::Config;
 use crate::converters::anthropic_to_kiro::build_kiro_payload as build_kiro_payload_anthropic;
 use crate::converters::openai_to_kiro::build_kiro_payload;
+use crate::dashboard::app::LogEntry;
 use crate::error::ApiError;
 use crate::http_client::KiroHttpClient;
 use crate::metrics::MetricsCollector;
@@ -27,7 +32,7 @@ use crate::models::anthropic::AnthropicMessagesRequest;
 use crate::models::openai::{ChatCompletionRequest, ModelList, OpenAIModel};
 use crate::resolver::ModelResolver;
 use crate::tokenizer::{count_anthropic_message_tokens, count_message_tokens, count_tools_tokens};
-use std::time::Instant;
+use crate::web_ui::config_db::ConfigDb;
 
 /// Application version from Cargo.toml
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,6 +47,8 @@ pub struct AppState {
     pub resolver: ModelResolver,
     pub config: Arc<Config>,
     pub metrics: Arc<MetricsCollector>,
+    pub log_buffer: Arc<Mutex<VecDeque<LogEntry>>>,
+    pub config_db: Option<Arc<ConfigDb>>,
 }
 
 /// Guard to ensure active connections are decremented on drop
@@ -473,20 +480,25 @@ async fn anthropic_messages_handler(
     let mut request = request;
     if state.config.truncation_recovery {
         // Convert messages to Value for injection
-        let mut msg_values: Vec<serde_json::Value> = request.messages.iter().map(|m| {
-            serde_json::json!({
-                "role": m.role,
-                "content": m.content
+        let mut msg_values: Vec<serde_json::Value> = request
+            .messages
+            .iter()
+            .map(|m| {
+                serde_json::json!({
+                    "role": m.role,
+                    "content": m.content
+                })
             })
-        }).collect();
+            .collect();
         crate::truncation::inject_anthropic_truncation_recovery(&mut msg_values);
         // Convert back
-        request.messages = msg_values.into_iter().map(|v| {
-            crate::models::anthropic::AnthropicMessage {
+        request.messages = msg_values
+            .into_iter()
+            .map(|v| crate::models::anthropic::AnthropicMessage {
                 role: v["role"].as_str().unwrap_or("user").to_string(),
                 content: v["content"].clone(),
-            }
-        }).collect();
+            })
+            .collect();
     }
 
     // Convert Anthropic request to Kiro format
@@ -697,6 +709,8 @@ mod tests {
             tls_cert_path: None,
             tls_key_path: None,
             truncation_recovery: true,
+            web_ui_enabled: false,
+            config_db_path: None,
         });
 
         let metrics = Arc::new(crate::metrics::MetricsCollector::new());
@@ -709,6 +723,8 @@ mod tests {
             resolver,
             config,
             metrics,
+            log_buffer: Arc::new(Mutex::new(VecDeque::new())),
+            config_db: None,
         }
     }
 

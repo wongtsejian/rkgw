@@ -138,6 +138,8 @@ mod tests {
             tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
+            web_ui_enabled: false,
+            config_db_path: None,
         });
 
         let metrics = Arc::new(crate::metrics::MetricsCollector::new());
@@ -150,6 +152,8 @@ mod tests {
             resolver,
             config,
             metrics,
+            log_buffer: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            config_db: None,
         }
     }
 
@@ -465,6 +469,8 @@ mod tests {
             tls_enabled,
             tls_cert_path: None,
             tls_key_path: None,
+            web_ui_enabled: false,
+            config_db_path: None,
         });
 
         let metrics = Arc::new(crate::metrics::MetricsCollector::new());
@@ -477,6 +483,8 @@ mod tests {
             resolver,
             config,
             metrics,
+            log_buffer: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
+            config_db: None,
         }
     }
 

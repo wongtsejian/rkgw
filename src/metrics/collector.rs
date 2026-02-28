@@ -248,6 +248,47 @@ impl MetricsCollector {
             .collect()
     }
 
+    /// Get a JSON snapshot of all metrics for the web UI
+    pub fn to_json_snapshot(&self) -> serde_json::Value {
+        let (p50, p95, p99) = self.get_latency_percentiles();
+
+        let model_stats: Vec<serde_json::Value> = self
+            .get_model_stats()
+            .iter()
+            .map(|(name, stats)| {
+                let requests = stats.request_count.load(Ordering::Relaxed);
+                let total_latency = stats.total_latency_ms.load(Ordering::Relaxed);
+                let avg_latency = if requests > 0 {
+                    total_latency as f64 / requests as f64
+                } else {
+                    0.0
+                };
+                serde_json::json!({
+                    "name": name,
+                    "requests": requests,
+                    "avg_latency_ms": avg_latency,
+                    "input_tokens": stats.total_input_tokens.load(Ordering::Relaxed),
+                    "output_tokens": stats.total_output_tokens.load(Ordering::Relaxed),
+                })
+            })
+            .collect();
+
+        let errors: std::collections::HashMap<String, u64> = self
+            .errors_by_type
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
+            .collect();
+
+        serde_json::json!({
+            "active_connections": self.get_active_connections(),
+            "total_requests": self.total_requests.load(Ordering::Relaxed),
+            "total_errors": self.total_errors.load(Ordering::Relaxed),
+            "latency": { "p50": p50, "p95": p95, "p99": p99 },
+            "models": model_stats,
+            "errors_by_type": errors,
+        })
+    }
+
     /// Clean up old samples (older than 15 minutes)
     pub fn cleanup_old_samples(&self) {
         let now = Instant::now();
