@@ -8,4 +8,6 @@ This project is a Rust rewrite of [kiro-gateway](https://github.com/jwadow/kiro-
 
 ## Contributors
 
-<!-- Add contributors here as they contribute to the project -->
+- [@donbader](https://github.com/donbader) (Taufan Silitonga)
+- [@if414013](https://github.com/if414013) (Corey Feng)
+- [@wongtsejian](https://github.com/wongtsejian) (Wong Tse Jian)
