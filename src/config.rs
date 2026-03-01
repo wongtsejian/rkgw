@@ -44,21 +44,14 @@ pub struct CliArgs {
     #[arg(long, env = "TLS_KEY")]
     pub tls_key: Option<String>,
 
-    /// Enable TLS
-    #[arg(long, env = "TLS_ENABLED", default_value = "false")]
-    pub tls_enabled: bool,
-
     /// Enable web UI dashboard (served at /_ui/)
     #[arg(long, env = "WEB_UI", default_value = "true")]
     pub web_ui: bool,
 
-    /// Allow binding to non-localhost without TLS (e.g. behind Docker/reverse proxy)
-    #[arg(long, env = "ALLOW_INSECURE", default_value = "false")]
-    pub allow_insecure: bool,
-
     /// Enable monitoring dashboard TUI
     #[arg(long, default_value = "false")]
     pub dashboard: bool,
+
 }
 
 #[derive(Clone, Debug)]
@@ -102,17 +95,16 @@ pub struct Config {
     // Dashboard
     pub dashboard: bool,
 
-    // TLS
-    pub tls_enabled: bool,
+    // TLS (always on — self-signed cert generated when no custom cert/key provided)
     pub tls_cert_path: Option<PathBuf>,
     pub tls_key_path: Option<PathBuf>,
-    pub allow_insecure: bool,
 
     // Web UI
     pub web_ui_enabled: bool,
 
     // Database
     pub database_url: Option<String>,
+
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -157,10 +149,8 @@ impl Config {
             fake_reasoning_handling: FakeReasoningHandling::AsReasoningContent,
             truncation_recovery: true,
             dashboard: false,
-            tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
-            allow_insecure: false,
             web_ui_enabled: true,
             database_url: None,
         }
@@ -197,11 +187,6 @@ impl Config {
         config.tls_cert_path = args.tls_cert.map(|s| expand_tilde(&s));
         config.tls_key_path = args.tls_key.map(|s| expand_tilde(&s));
 
-        // Enable TLS when explicitly set or when cert+key are both provided
-        config.tls_enabled =
-            args.tls_enabled || (config.tls_cert_path.is_some() && config.tls_key_path.is_some());
-
-        config.allow_insecure = args.allow_insecure;
         config.database_url = args.database_url;
 
         Ok(config)
@@ -240,30 +225,12 @@ impl Config {
             }
         }
 
-        // Require TLS for non-loopback IP bindings (unless explicitly bypassed)
-        let is_loopback = self.server_host == "127.0.0.1" || self.server_host == "::1";
-
-        if !is_loopback && !self.is_tls_active() && !self.allow_insecure {
-            if self.server_host == "localhost" {
-                tracing::warn!(
-                    "Host 'localhost' requires TLS because only IP literals (127.0.0.1, ::1) are recognized as loopback. \
-                     Use --host 127.0.0.1 for local-only access without TLS, or enable TLS with --tls flag."
-                );
-            }
-
-            anyhow::bail!(
-                "TLS is required when binding to non-localhost addresses (current: {}). \
-                 Either enable TLS with --tls flag, or bind to localhost with --host 127.0.0.1",
-                self.server_host
-            );
-        }
-
         Ok(())
     }
 
-    /// Returns true if TLS should be used (explicitly enabled or cert/key provided).
-    pub fn is_tls_active(&self) -> bool {
-        self.tls_enabled || (self.tls_cert_path.is_some() && self.tls_key_path.is_some())
+    /// Whether custom TLS certificates were provided (vs auto-generated self-signed).
+    pub fn has_custom_tls(&self) -> bool {
+        self.tls_cert_path.is_some() && self.tls_key_path.is_some()
     }
 }
 
@@ -419,10 +386,9 @@ mod tests {
         assert_ne!(FakeReasoningHandling::Remove, FakeReasoningHandling::Pass);
     }
 
-    fn create_test_config(server_host: &str, tls_enabled: bool) -> Config {
+    fn create_test_config(server_host: &str) -> Config {
         Config {
             server_host: server_host.to_string(),
-            tls_enabled,
             ..Config::with_defaults()
         }
     }
@@ -437,56 +403,28 @@ mod tests {
         assert_eq!(config.debug_mode, DebugMode::Off);
         assert!(config.fake_reasoning_enabled);
         assert!(config.truncation_recovery);
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
     }
 
     #[test]
-    fn test_validate_localhost_without_tls_passes() {
-        let config = create_test_config("127.0.0.1", false);
-        assert!(config.validate().is_ok());
+    fn test_validate_any_host_passes() {
+        // TLS is always on, so any host should pass validation
+        for host in &["127.0.0.1", "::1", "0.0.0.0", "192.168.1.100", "localhost"] {
+            let config = create_test_config(host);
+            assert!(config.validate().is_ok(), "validate() failed for host '{}'", host);
+        }
     }
 
     #[test]
-    fn test_validate_localhost_string_without_tls_fails() {
-        let config = create_test_config("localhost", false);
-        let result = config.validate();
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("TLS is required"));
-    }
+    fn test_has_custom_tls() {
+        let mut config = Config::with_defaults();
+        assert!(!config.has_custom_tls());
 
-    #[test]
-    fn test_validate_ipv6_localhost_without_tls_passes() {
-        let config = create_test_config("::1", false);
-        assert!(config.validate().is_ok());
-    }
+        config.tls_cert_path = Some(PathBuf::from("/tmp/cert.pem"));
+        assert!(!config.has_custom_tls()); // only cert, no key
 
-    #[test]
-    fn test_validate_0_0_0_0_without_tls_fails() {
-        let config = create_test_config("0.0.0.0", false);
-        let result = config.validate();
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("TLS is required"));
-    }
-
-    #[test]
-    fn test_validate_0_0_0_0_with_tls_passes() {
-        let config = create_test_config("0.0.0.0", true);
-        assert!(config.validate().is_ok());
-    }
-
-    #[test]
-    fn test_validate_specific_ip_without_tls_fails() {
-        let config = create_test_config("192.168.1.100", false);
-        let result = config.validate();
-        assert!(result.is_err());
-        let err_msg = result.unwrap_err().to_string();
-        assert!(err_msg.contains("TLS is required"));
-    }
-
-    #[test]
-    fn test_validate_specific_ip_with_tls_passes() {
-        let config = create_test_config("192.168.1.100", true);
-        assert!(config.validate().is_ok());
+        config.tls_key_path = Some(PathBuf::from("/tmp/key.pem"));
+        assert!(config.has_custom_tls()); // both provided
     }
 }

@@ -17,7 +17,7 @@ pub fn classify_config_change(key: &str) -> ChangeType {
         | "truncation_recovery"
         | "tool_description_max_length"
         | "first_token_timeout" => ChangeType::HotReload,
-        "server_host" | "server_port" | "tls_enabled" | "tls_cert_path" | "tls_key_path"
+        "server_host" | "server_port" | "tls_cert_path" | "tls_key_path"
         | "proxy_api_key" => ChangeType::RequiresRestart,
         // Default unknown keys to restart for safety
         _ => ChangeType::RequiresRestart,
@@ -84,7 +84,7 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
                 )),
             }
         }
-        "fake_reasoning_enabled" | "truncation_recovery" | "tls_enabled" => {
+        "fake_reasoning_enabled" | "truncation_recovery" => {
             if value.is_boolean() || value.as_str().is_some_and(|s| s == "true" || s == "false") {
                 Ok(())
             } else {
@@ -164,9 +164,28 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
         "first_token_timeout",
         "Seconds to wait for the first token before timing out",
     );
-    m.insert("tls_enabled", "Enable HTTPS/TLS for the server");
-    m.insert("tls_cert_path", "Path to TLS certificate file (PEM)");
-    m.insert("tls_key_path", "Path to TLS private key file (PEM)");
+    m.insert("tls_cert_path", "Path to custom TLS certificate file (PEM). Optional — self-signed cert used when not set");
+    m.insert("tls_key_path", "Path to custom TLS private key file (PEM). Optional — self-signed key used when not set");
+    m.insert(
+        "oauth_client_id",
+        "AWS SSO OIDC client ID for OAuth authentication",
+    );
+    m.insert(
+        "oauth_client_secret",
+        "AWS SSO OIDC client secret (JWT, ~3.5KB)",
+    );
+    m.insert(
+        "oauth_client_secret_expires_at",
+        "When the OAuth client secret expires (re-registration needed)",
+    );
+    m.insert(
+        "oauth_start_url",
+        "IAM Identity Center start URL",
+    );
+    m.insert(
+        "oauth_sso_region",
+        "AWS region for SSO OIDC endpoints",
+    );
     m
 }
 
@@ -209,10 +228,6 @@ mod tests {
         );
         assert_eq!(
             classify_config_change("server_port"),
-            ChangeType::RequiresRestart
-        );
-        assert_eq!(
-            classify_config_change("tls_enabled"),
             ChangeType::RequiresRestart
         );
         assert_eq!(
@@ -271,7 +286,6 @@ mod tests {
         for key in &[
             "fake_reasoning_enabled",
             "truncation_recovery",
-            "tls_enabled",
         ] {
             assert!(validate_config_field(key, &json!(true)).is_ok());
             assert!(validate_config_field(key, &json!(false)).is_ok());
@@ -323,7 +337,6 @@ mod tests {
             "truncation_recovery",
             "tool_description_max_length",
             "first_token_timeout",
-            "tls_enabled",
             "tls_cert_path",
             "tls_key_path",
         ];

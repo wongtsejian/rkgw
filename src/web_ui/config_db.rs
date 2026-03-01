@@ -243,11 +243,6 @@ impl ConfigDb {
                         config.first_token_timeout = v;
                     }
                 }
-                "tls_enabled" => {
-                    if let Ok(v) = value.parse() {
-                        config.tls_enabled = v;
-                    }
-                }
                 "tls_cert_path" => {
                     config.tls_cert_path = Some(std::path::PathBuf::from(value));
                 }
@@ -338,6 +333,95 @@ impl ConfigDb {
     /// Get the stored Kiro refresh token.
     pub async fn get_refresh_token(&self) -> Result<Option<String>> {
         self.get("kiro_refresh_token").await
+    }
+
+    /// Save OAuth-based setup (all fields in one transaction).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn save_oauth_setup(
+        &self,
+        proxy_key: &str,
+        refresh_token: &str,
+        region: &str,
+        client_id: &str,
+        client_secret: &str,
+        client_secret_expires_at: &str,
+        start_url: &str,
+    ) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin transaction for OAuth setup")?;
+
+        let keys_values: &[(&str, &str)] = &[
+            ("proxy_api_key", proxy_key),
+            ("kiro_refresh_token", refresh_token),
+            ("kiro_region", "us-east-1"),
+            ("oauth_sso_region", region),
+            ("oauth_client_id", client_id),
+            ("oauth_client_secret", client_secret),
+            ("oauth_client_secret_expires_at", client_secret_expires_at),
+            ("oauth_start_url", start_url),
+            ("setup_complete", "true"),
+        ];
+
+        for &(key, value) in keys_values {
+            let old_value: Option<String> =
+                sqlx::query_scalar("SELECT value FROM config WHERE key = $1")
+                    .bind(key)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("Failed to fetch old config value during OAuth setup")?;
+
+            sqlx::query(
+                "INSERT INTO config (key, value, updated_at)
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
+            )
+            .bind(key)
+            .bind(value)
+            .execute(&mut *tx)
+            .await
+            .with_context(|| format!("Failed to upsert config key '{}' during OAuth setup", key))?;
+
+            sqlx::query(
+                "INSERT INTO config_history (key, old_value, new_value, source)
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(key)
+            .bind(&old_value)
+            .bind(value)
+            .bind("oauth_setup")
+            .execute(&mut *tx)
+            .await
+            .with_context(|| {
+                format!(
+                    "Failed to record config history for '{}' during OAuth setup",
+                    key
+                )
+            })?;
+        }
+
+        tx.commit()
+            .await
+            .context("Failed to commit OAuth setup transaction")?;
+
+        Ok(())
+    }
+
+    /// Get OAuth client credentials from config.
+    #[allow(dead_code)]
+    pub async fn get_oauth_client(&self) -> Result<Option<(String, String, String)>> {
+        let client_id = self.get("oauth_client_id").await?;
+        let client_secret = self.get("oauth_client_secret").await?;
+        let expires_at = self
+            .get("oauth_client_secret_expires_at")
+            .await?
+            .unwrap_or_default();
+        match (client_id, client_secret) {
+            (Some(id), Some(secret)) => Ok(Some((id, secret, expires_at))),
+            _ => Ok(None),
+        }
     }
 }
 

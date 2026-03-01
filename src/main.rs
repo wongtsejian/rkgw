@@ -108,57 +108,9 @@ async fn main() -> Result<()> {
     );
     tracing::debug!("Debug mode: {:?}", config.debug_mode);
 
-    // Log auto-enable of TLS (must happen after tracing is initialized)
-    if config.is_tls_active() && !config.tls_enabled {
-        tracing::info!("TLS certificate and key provided — automatically enabling HTTPS.");
-    }
-
     // Initialize authentication manager (only when setup is complete)
     let auth_manager = if setup_complete_flag {
-        if let Some(ref db) = config_db {
-            tracing::info!("Initializing authentication...");
-            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
-                Ok(am) => {
-                    let am = Arc::new(am);
-                    // Test authentication by getting a token
-                    match am.get_access_token().await {
-                        Ok(token) => {
-                            tracing::info!(
-                                "Authentication successful (token length: {})",
-                                token.len()
-                            );
-                        }
-                        Err(e) => {
-                            tracing::error!("Authentication failed: {}", e);
-                            tracing::warn!(
-                                "Server will start but API requests will fail without valid credentials"
-                            );
-                        }
-                    }
-                    am
-                }
-                Err(e) => {
-                    tracing::error!("Failed to initialize auth manager: {}", e);
-                    tracing::warn!("Starting with dummy auth — API requests will fail");
-                    Arc::new(
-                        auth::AuthManager::new_placeholder(
-                            config.kiro_region.clone(),
-                            config.token_refresh_threshold,
-                        )
-                        .context("Failed to create fallback auth manager")?,
-                    )
-                }
-            }
-        } else {
-            // No config DB — create fallback auth manager
-            Arc::new(
-                auth::AuthManager::new_placeholder(
-                    config.kiro_region.clone(),
-                    config.token_refresh_threshold,
-                )
-                .context("Failed to create fallback auth manager")?,
-            )
-        }
+        init_auth_from_config_db(&config, &config_db).await?
     } else {
         // Setup not complete — create a dummy auth manager
         Arc::new(
@@ -226,22 +178,7 @@ async fn main() -> Result<()> {
     // so it can be swapped at runtime (e.g., after re-authentication).
     // The http_client retains its own Arc<AuthManager> for connection-level retries.
     let app_auth_manager = if setup_complete_flag {
-        if let Some(ref db) = config_db {
-            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
-                Ok(am) => am,
-                Err(_) => auth::AuthManager::new_placeholder(
-                    config.kiro_region.clone(),
-                    config.token_refresh_threshold,
-                )
-                .context("Failed to create fallback auth manager for AppState")?,
-            }
-        } else {
-            auth::AuthManager::new_placeholder(
-                config.kiro_region.clone(),
-                config.token_refresh_threshold,
-            )
-            .context("Failed to create fallback auth manager for AppState")?
-        }
+        init_app_auth_from_config_db(&config, &config_db).await?
     } else {
         auth::AuthManager::new_placeholder(
             config.kiro_region.clone(),
@@ -277,24 +214,18 @@ async fn main() -> Result<()> {
     let sock_addr: std::net::SocketAddr = resolved_addrs
         .next()
         .context("No resolved socket addresses for configured server host")?;
-    let protocol = if config.is_tls_active() {
-        "https"
-    } else {
-        "http"
-    };
 
-    // Build optional TLS configuration
-    let rustls_config = if config.is_tls_active() {
-        let tls_cfg = tls::TlsConfig {
-            cert_path: config.tls_cert_path.clone(),
-            key_path: config.tls_key_path.clone(),
-        };
-        let rc = tls_cfg.build_rustls_config().await?;
-        tracing::info!("TLS enabled");
-        Some(rc)
-    } else {
-        None
+    // TLS is always on — build rustls config (self-signed if no custom cert/key)
+    let tls_cfg = tls::TlsConfig {
+        cert_path: config.tls_cert_path.clone(),
+        key_path: config.tls_key_path.clone(),
     };
+    let rustls_config = tls_cfg.build_rustls_config().await?;
+    if config.has_custom_tls() {
+        tracing::info!("TLS enabled (custom certificate)");
+    } else {
+        tracing::info!("TLS enabled (self-signed certificate)");
+    }
 
     // Unified graceful shutdown via axum_server::Handle for both HTTP and HTTPS
     let handle = axum_server::Handle::new();
@@ -304,23 +235,14 @@ async fn main() -> Result<()> {
         shutdown_handle.graceful_shutdown(Some(std::time::Duration::from_secs(10)));
     });
 
-    // Build server future — the only difference is bind vs bind_rustls.
-    // Boxing lets us treat both paths uniformly and eliminates the 4-way branch.
+    // Build server future — always use bind_rustls (TLS is always on)
     let server_future: std::pin::Pin<
         Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>,
-    > = if let Some(rustls_config) = rustls_config {
-        Box::pin(
-            axum_server::bind_rustls(sock_addr, rustls_config)
-                .handle(handle.clone())
-                .serve(app.into_make_service()),
-        )
-    } else {
-        Box::pin(
-            axum_server::bind(sock_addr)
-                .handle(handle.clone())
-                .serve(app.into_make_service()),
-        )
-    };
+    > = Box::pin(
+        axum_server::bind_rustls(sock_addr, rustls_config)
+            .handle(handle.clone())
+            .serve(app.into_make_service()),
+    );
 
     if config.dashboard {
         let dashboard_metrics = Arc::clone(&metrics);
@@ -346,7 +268,7 @@ async fn main() -> Result<()> {
         }
     } else {
         print_startup_banner(&config);
-        tracing::info!("Server listening on {}://{}", protocol, sock_addr);
+        tracing::info!("Server listening on https://{}", sock_addr);
 
         server_future.await.context("Server error")?;
     }
@@ -354,6 +276,78 @@ async fn main() -> Result<()> {
     tracing::info!("Server shutdown complete");
 
     Ok(())
+}
+
+/// Initialize AuthManager from config DB (Arc-wrapped, for the http_client).
+async fn init_auth_from_config_db(
+    config: &config::Config,
+    config_db: &Option<Arc<web_ui::config_db::ConfigDb>>,
+) -> Result<Arc<auth::AuthManager>> {
+    if let Some(ref db) = config_db {
+        tracing::info!("Initializing authentication from config database...");
+        match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
+            Ok(am) => {
+                let am = Arc::new(am);
+                match am.get_access_token().await {
+                    Ok(token) => {
+                        tracing::info!(
+                            "Authentication successful (token length: {})",
+                            token.len()
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!("Authentication failed: {}", e);
+                        tracing::warn!(
+                            "Server will start but API requests will fail without valid credentials"
+                        );
+                    }
+                }
+                Ok(am)
+            }
+            Err(e) => {
+                tracing::error!("Failed to initialize auth manager: {}", e);
+                tracing::warn!("Starting with dummy auth — API requests will fail");
+                Ok(Arc::new(
+                    auth::AuthManager::new_placeholder(
+                        config.kiro_region.clone(),
+                        config.token_refresh_threshold,
+                    )
+                    .context("Failed to create fallback auth manager")?,
+                ))
+            }
+        }
+    } else {
+        Ok(Arc::new(
+            auth::AuthManager::new_placeholder(
+                config.kiro_region.clone(),
+                config.token_refresh_threshold,
+            )
+            .context("Failed to create fallback auth manager")?,
+        ))
+    }
+}
+
+/// Initialize AuthManager from config DB (unwrapped, for AppState).
+async fn init_app_auth_from_config_db(
+    config: &config::Config,
+    config_db: &Option<Arc<web_ui::config_db::ConfigDb>>,
+) -> Result<auth::AuthManager> {
+    if let Some(ref db) = config_db {
+        match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
+            Ok(am) => Ok(am),
+            Err(_) => auth::AuthManager::new_placeholder(
+                config.kiro_region.clone(),
+                config.token_refresh_threshold,
+            )
+            .context("Failed to create fallback auth manager for AppState"),
+        }
+    } else {
+        auth::AuthManager::new_placeholder(
+            config.kiro_region.clone(),
+            config.token_refresh_threshold,
+        )
+        .context("Failed to create fallback auth manager for AppState")
+    }
 }
 
 /// Load models from Kiro API (no retries - fail fast during startup)
@@ -493,17 +487,14 @@ fn print_startup_banner(config: &config::Config) {
 
     println!("{}", banner);
     println!("  Version:     {}", env!("CARGO_PKG_VERSION"));
-    let protocol = if config.is_tls_active() {
-        "https"
-    } else {
-        "http"
-    };
     println!(
-        "  Server:      {}://{}:{}",
-        protocol, config.server_host, config.server_port
+        "  Server:      https://{}:{}",
+        config.server_host, config.server_port
     );
-    if config.is_tls_active() {
-        println!("  TLS:         enabled");
+    if config.has_custom_tls() {
+        println!("  TLS:         enabled (custom certificate)");
+    } else {
+        println!("  TLS:         enabled (self-signed)");
     }
     println!("  Region:      {}", config.kiro_region);
     println!("  Debug Mode:  {:?}", config.debug_mode);
@@ -518,14 +509,9 @@ fn print_startup_banner(config: &config::Config) {
         config.fake_reasoning_max_tokens
     );
     if config.web_ui_enabled {
-        let protocol = if config.is_tls_active() {
-            "https"
-        } else {
-            "http"
-        };
         println!(
-            "  Web UI:      {}://{}:{}/_ui/",
-            protocol, config.server_host, config.server_port
+            "  Web UI:      https://{}:{}/_ui/",
+            config.server_host, config.server_port
         );
     }
     println!();

@@ -66,11 +66,14 @@ pub fn web_ui_routes(state: AppState) -> Router {
         ))
         .with_state(state.clone());
 
-    // API routes that work without auth (setup flow + config read)
+    // API routes that work without auth (setup flow + config read + OAuth)
     let public_api_routes = Router::new()
         .route("/setup", post(routes::setup))
         .route("/config", get(routes::get_config))
         .route("/config/schema", get(routes::get_config_schema))
+        .route("/oauth/start", post(routes::oauth_start))
+        .route("/oauth/callback", get(routes::oauth_callback))
+        .route("/oauth/device/poll", post(routes::oauth_device_poll))
         .with_state(state.clone());
 
     // React SPA: root + static assets (no auth)

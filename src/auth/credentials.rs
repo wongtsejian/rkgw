@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 
-use super::types::{AuthType, Credentials};
+use super::types::Credentials;
 use crate::web_ui::config_db::ConfigDb;
 
-/// Load credentials from the gateway's config database (KiroDesktop auth type).
+/// Load credentials from the gateway's config database.
 ///
-/// Reads `kiro_refresh_token` and `kiro_region` from the config DB.
-/// Returns credentials with `client_id: None, client_secret: None`,
-/// which triggers the KiroDesktop auth path.
+/// Reads refresh token, region, and OAuth client credentials from the config DB.
+/// Returns an error if `client_id` or `client_secret` is missing (device code
+/// OAuth setup must be completed first).
 pub async fn load_from_config_db(config_db: &ConfigDb) -> Result<Credentials> {
     let refresh_token = config_db
         .get_refresh_token()
@@ -19,7 +19,19 @@ pub async fn load_from_config_db(config_db: &ConfigDb) -> Result<Credentials> {
         .await?
         .unwrap_or_else(|| "us-east-1".to_string());
 
-    tracing::info!("Loaded credentials from config DB (KiroDesktop auth)");
+    // Load OAuth client credentials
+    let client_id = config_db.get("oauth_client_id").await?;
+    let client_secret = config_db.get("oauth_client_secret").await?;
+    let sso_region = config_db.get("oauth_sso_region").await?;
+
+    if client_id.is_none() || client_secret.is_none() {
+        anyhow::bail!(
+            "OAuth client credentials (client_id/client_secret) not found in config database. \
+             Please complete the device code login via the web UI."
+        );
+    }
+
+    tracing::info!("Loaded credentials from config DB (AWS SSO OIDC auth)");
 
     Ok(Credentials {
         refresh_token,
@@ -27,22 +39,11 @@ pub async fn load_from_config_db(config_db: &ConfigDb) -> Result<Credentials> {
         expires_at: None,
         profile_arn: None,
         region,
-        client_id: None,
-        client_secret: None,
-        sso_region: None,
+        client_id,
+        client_secret,
+        sso_region,
         scopes: None,
     })
-}
-
-/// Detect authentication type based on credentials
-pub fn detect_auth_type(creds: &Credentials) -> AuthType {
-    if creds.client_id.is_some() && creds.client_secret.is_some() {
-        tracing::info!("Detected auth type: AWS SSO OIDC (kiro-cli)");
-        AuthType::AwsSsoOidc
-    } else {
-        tracing::info!("Detected auth type: Kiro Desktop");
-        AuthType::KiroDesktop
-    }
 }
 
 #[cfg(test)]
@@ -75,38 +76,6 @@ mod tests {
         assert_eq!(dt.to_rfc3339(), "2025-01-12T10:30:00+00:00");
     }
 
-    #[test]
-    fn test_detect_auth_type_sso() {
-        let creds = Credentials {
-            refresh_token: "token".to_string(),
-            access_token: None,
-            expires_at: None,
-            profile_arn: None,
-            region: "us-east-1".to_string(),
-            client_id: Some("client".to_string()),
-            client_secret: Some("secret".to_string()),
-            sso_region: None,
-            scopes: None,
-        };
-        assert_eq!(detect_auth_type(&creds), AuthType::AwsSsoOidc);
-    }
-
-    #[test]
-    fn test_detect_auth_type_kiro_desktop() {
-        let creds = Credentials {
-            refresh_token: "token".to_string(),
-            access_token: None,
-            expires_at: None,
-            profile_arn: None,
-            region: "us-east-1".to_string(),
-            client_id: None,
-            client_secret: None,
-            sso_region: None,
-            scopes: None,
-        };
-        assert_eq!(detect_auth_type(&creds), AuthType::KiroDesktop);
-    }
-
     /// Helper to connect to the test database using DATABASE_URL.
     /// Returns None if DATABASE_URL is not set (skips database-dependent tests).
     async fn setup_test_db() -> Option<ConfigDb> {
@@ -115,24 +84,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_load_from_config_db() {
+    async fn test_load_from_config_db_with_oauth_creds() {
         let Some(db) = setup_test_db().await else {
-            eprintln!("Skipping test_load_from_config_db: DATABASE_URL not set");
+            eprintln!("Skipping test_load_from_config_db_with_oauth_creds: DATABASE_URL not set");
             return;
         };
         db.set("kiro_refresh_token", "my-refresh-token", "test")
             .await
             .unwrap();
         db.set("kiro_region", "us-west-2", "test").await.unwrap();
+        db.set("oauth_client_id", "my-client-id", "test")
+            .await
+            .unwrap();
+        db.set("oauth_client_secret", "my-client-secret", "test")
+            .await
+            .unwrap();
 
         let creds = load_from_config_db(&db).await.unwrap();
         assert_eq!(creds.refresh_token, "my-refresh-token");
         assert_eq!(creds.region, "us-west-2");
-        assert!(creds.client_id.is_none());
-        assert!(creds.client_secret.is_none());
+        assert_eq!(creds.client_id.as_deref(), Some("my-client-id"));
+        assert_eq!(creds.client_secret.as_deref(), Some("my-client-secret"));
+    }
 
-        let auth_type = detect_auth_type(&creds);
-        assert_eq!(auth_type, AuthType::KiroDesktop);
+    #[tokio::test]
+    async fn test_load_from_config_db_missing_oauth_creds() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping test_load_from_config_db_missing_oauth_creds: DATABASE_URL not set");
+            return;
+        };
+        db.set("kiro_refresh_token", "my-refresh-token", "test")
+            .await
+            .unwrap();
+
+        let result = load_from_config_db(&db).await;
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("OAuth client credentials"));
     }
 
     #[tokio::test]
@@ -142,6 +132,8 @@ mod tests {
             return;
         };
         db.set("kiro_refresh_token", "token", "test").await.unwrap();
+        db.set("oauth_client_id", "cid", "test").await.unwrap();
+        db.set("oauth_client_secret", "csec", "test").await.unwrap();
 
         let creds = load_from_config_db(&db).await.unwrap();
         assert_eq!(creds.region, "us-east-1");

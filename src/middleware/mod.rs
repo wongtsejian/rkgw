@@ -64,27 +64,18 @@ pub async fn auth_middleware(
 
 /// HSTS (HTTP Strict Transport Security) middleware
 ///
-/// Adds the Strict-Transport-Security header when TLS is enabled,
-/// instructing clients to only use HTTPS for future requests.
+/// Always adds the Strict-Transport-Security header since TLS is always on.
 pub async fn hsts_middleware(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     request: Request<Body>,
     next: Next,
 ) -> Response {
     let mut response = next.run(request).await;
 
-    // Only add HSTS header when TLS is active
-    if state
-        .config
-        .read()
-        .unwrap_or_else(|p| p.into_inner())
-        .is_tls_active()
-    {
-        response.headers_mut().insert(
-            axum::http::header::STRICT_TRANSPORT_SECURITY,
-            axum::http::HeaderValue::from_static("max-age=31536000"),
-        );
-    }
+    response.headers_mut().insert(
+        axum::http::header::STRICT_TRANSPORT_SECURITY,
+        axum::http::HeaderValue::from_static("max-age=31536000"),
+    );
 
     response
 }
@@ -430,44 +421,9 @@ mod tests {
 
     // HSTS middleware tests
 
-    fn create_test_state_with_tls(tls_enabled: bool) -> AppState {
-        let cache = ModelCache::new(3600);
-        let auth_manager_for_http = Arc::new(
-            AuthManager::new_for_testing("test-token".to_string(), "us-east-1".to_string(), 300)
-                .unwrap(),
-        );
-        let http_client =
-            Arc::new(KiroHttpClient::new(auth_manager_for_http, 20, 30, 300, 3).unwrap());
-        let auth_manager = Arc::new(tokio::sync::RwLock::new(
-            AuthManager::new_for_testing("test-token".to_string(), "us-east-1".to_string(), 300)
-                .unwrap(),
-        ));
-        let resolver = ModelResolver::new(cache.clone(), HashMap::new());
-        let config = Config {
-            proxy_api_key: "test-key-123".to_string(),
-            fake_reasoning_max_tokens: 10000,
-            tls_enabled,
-            ..Config::with_defaults()
-        };
-
-        let metrics = Arc::new(crate::metrics::MetricsCollector::new());
-
-        AppState {
-            model_cache: cache,
-            auth_manager,
-            http_client,
-            resolver,
-            config: Arc::new(std::sync::RwLock::new(config)),
-            setup_complete: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            metrics,
-            log_buffer: Arc::new(std::sync::Mutex::new(std::collections::VecDeque::new())),
-            config_db: None,
-        }
-    }
-
     #[tokio::test]
-    async fn test_hsts_middleware_with_tls_enabled() {
-        let state = create_test_state_with_tls(true);
+    async fn test_hsts_middleware_always_adds_header() {
+        let state = create_test_state();
         let app = Router::new()
             .route("/test", get(test_handler))
             .layer(axum::middleware::from_fn_with_state(
@@ -480,59 +436,13 @@ mod tests {
 
         let response = app.clone().oneshot(request).await.unwrap();
 
-        // Check that HSTS header is present
+        // HSTS header is always present (TLS is always on)
         assert!(response
             .headers()
             .contains_key(axum::http::header::STRICT_TRANSPORT_SECURITY));
         let hsts_header = response
             .headers()
             .get(axum::http::header::STRICT_TRANSPORT_SECURITY)
-            .unwrap();
-        assert_eq!(hsts_header, "max-age=31536000");
-    }
-
-    #[tokio::test]
-    async fn test_hsts_middleware_with_tls_disabled() {
-        let state = create_test_state_with_tls(false);
-        let app = Router::new()
-            .route("/test", get(test_handler))
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                hsts_middleware,
-            ))
-            .with_state(state);
-
-        let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
-
-        let response = app.clone().oneshot(request).await.unwrap();
-
-        // Check that HSTS header is NOT present
-        assert!(!response
-            .headers()
-            .contains_key(axum::http::header::STRICT_TRANSPORT_SECURITY));
-    }
-
-    #[tokio::test]
-    async fn test_hsts_middleware_header_value() {
-        let state = create_test_state_with_tls(true);
-        let app = Router::new()
-            .route("/test", get(test_handler))
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                hsts_middleware,
-            ))
-            .with_state(state);
-
-        let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
-
-        let response = app.clone().oneshot(request).await.unwrap();
-
-        // Verify the exact header value
-        let hsts_header = response
-            .headers()
-            .get(axum::http::header::STRICT_TRANSPORT_SECURITY)
-            .unwrap()
-            .to_str()
             .unwrap();
         assert_eq!(hsts_header, "max-age=31536000");
     }

@@ -49,3 +49,55 @@ export async function checkSetupStatus(): Promise<boolean> {
     return false
   }
 }
+
+// --- OAuth ---
+
+export interface OAuthBrowserResponse {
+  flow: 'browser'
+  authorize_url: string
+}
+
+export interface OAuthDeviceResponse {
+  flow: 'device'
+  user_code: string
+  verification_uri: string
+  verification_uri_complete: string
+  device_code_id: string
+}
+
+export type OAuthStartResponse = OAuthBrowserResponse | OAuthDeviceResponse
+
+export async function startOAuth(data: {
+  region: string
+  proxy_api_key: string
+  flow: 'browser' | 'device'
+  start_url?: string
+}): Promise<OAuthStartResponse> {
+  const res = await fetch(`${BASE}/oauth/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export interface DevicePollResponse {
+  status: 'pending' | 'slow_down' | 'complete'
+}
+
+export async function pollDeviceCode(deviceCodeId: string): Promise<DevicePollResponse> {
+  const res = await fetch(`${BASE}/oauth/device/poll`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_code_id: deviceCodeId }),
+  })
+  if (!res.ok) {
+    const text = await res.text()
+    throw new Error(text || `HTTP ${res.status}`)
+  }
+  return res.json()
+}

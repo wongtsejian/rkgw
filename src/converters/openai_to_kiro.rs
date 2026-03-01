@@ -584,10 +584,8 @@ mod tests {
             fake_reasoning_handling: crate::config::FakeReasoningHandling::AsReasoningContent,
             truncation_recovery: true,
             dashboard: false,
-            tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
-            allow_insecure: false,
             web_ui_enabled: false,
             database_url: None,
         }

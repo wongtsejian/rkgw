@@ -12,6 +12,14 @@ export default function App() {
   const [setupComplete, setSetupComplete] = useState<boolean | null>(null)
 
   useEffect(() => {
+    // Handle browser OAuth callback redirect
+    const params = new URLSearchParams(window.location.search)
+    if (params.get('setup') === 'complete') {
+      window.history.replaceState({}, '', window.location.pathname)
+      setSetupComplete(true)
+      return
+    }
+
     checkSetupStatus().then(setSetupComplete)
   }, [])
 

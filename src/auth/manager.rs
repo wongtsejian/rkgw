@@ -6,7 +6,7 @@ use tokio::sync::RwLock;
 
 use super::credentials;
 use super::refresh;
-use super::types::{AuthType, Credentials};
+use super::types::Credentials;
 use crate::web_ui::config_db::ConfigDb;
 
 /// Authentication manager
@@ -20,9 +20,6 @@ pub struct AuthManager {
 
     /// Token expiration time
     expires_at: Arc<RwLock<Option<DateTime<Utc>>>>,
-
-    /// Authentication type
-    auth_type: AuthType,
 
     /// HTTP client for refresh requests
     client: Client,
@@ -64,7 +61,6 @@ impl AuthManager {
             credentials: Arc::new(RwLock::new(credentials)),
             access_token: Arc::new(RwLock::new(Some(access_token))),
             expires_at: Arc::new(RwLock::new(Some(Utc::now() + Duration::hours(1)))),
-            auth_type: AuthType::AwsSsoOidc,
             client,
             config_db: None,
             refresh_threshold: refresh_threshold as i64,
@@ -97,7 +93,6 @@ impl AuthManager {
             credentials: Arc::new(RwLock::new(credentials)),
             access_token: Arc::new(RwLock::new(None)),
             expires_at: Arc::new(RwLock::new(None)),
-            auth_type: AuthType::KiroDesktop,
             client,
             config_db: None,
             refresh_threshold: refresh_threshold as i64,
@@ -106,13 +101,10 @@ impl AuthManager {
 
     /// Create a new AuthManager from the gateway's config database.
     ///
-    /// Loads credentials (refresh token) from ConfigDb and uses KiroDesktop or
-    /// AwsSsoOidc auth depending on whether client_id/secret are present.
+    /// Loads credentials (refresh token + OAuth client creds) from ConfigDb.
     pub async fn new(config_db: Arc<ConfigDb>, refresh_threshold: u64) -> Result<Self> {
         tracing::info!("Loading credentials from database");
         let credentials = credentials::load_from_config_db(&config_db).await?;
-
-        let auth_type = credentials::detect_auth_type(&credentials);
 
         let access_token = credentials.access_token.clone();
         let expires_at = credentials.expires_at;
@@ -126,7 +118,6 @@ impl AuthManager {
             credentials: Arc::new(RwLock::new(credentials)),
             access_token: Arc::new(RwLock::new(access_token)),
             expires_at: Arc::new(RwLock::new(expires_at)),
-            auth_type,
             client,
             config_db: Some(config_db),
             refresh_threshold: refresh_threshold as i64,
@@ -164,15 +155,12 @@ impl AuthManager {
         let mut creds = self.credentials.write().await;
 
         // First attempt: refresh using current credentials
-        let result = match self.auth_type {
-            AuthType::KiroDesktop => refresh::refresh_kiro_desktop(&self.client, &creds).await,
-            AuthType::AwsSsoOidc => refresh::refresh_aws_sso_oidc(&self.client, &creds).await,
-        };
+        let result = refresh::refresh_aws_sso_oidc(&self.client, &creds).await;
 
         let token_data = match result {
             Ok(data) => data,
             Err(e) if e.to_string().contains("400") => {
-                // On 400 error, try reloading credentials from database
+                // On 400 error, try reloading credentials from config DB
                 if let Some(ref config_db) = self.config_db {
                     tracing::warn!(
                         "Token refresh failed with 400, reloading credentials from database..."
@@ -182,14 +170,7 @@ impl AuthManager {
                         .context("Failed to reload credentials from database")?;
 
                     // Retry with fresh credentials
-                    match self.auth_type {
-                        AuthType::KiroDesktop => {
-                            refresh::refresh_kiro_desktop(&self.client, &creds).await?
-                        }
-                        AuthType::AwsSsoOidc => {
-                            refresh::refresh_aws_sso_oidc(&self.client, &creds).await?
-                        }
-                    }
+                    refresh::refresh_aws_sso_oidc(&self.client, &creds).await?
                 } else {
                     return Err(e);
                 }
@@ -284,7 +265,6 @@ mod tests {
             credentials: Arc::new(RwLock::new(creds)),
             access_token: Arc::new(RwLock::new(Some("token".to_string()))),
             expires_at: Arc::new(RwLock::new(Some(Utc::now() + Duration::seconds(600)))),
-            auth_type: AuthType::KiroDesktop,
             client: Client::new(),
             config_db: None,
             refresh_threshold: 300,
@@ -317,7 +297,6 @@ mod tests {
             })),
             access_token: Arc::new(RwLock::new(None)),
             expires_at: Arc::new(RwLock::new(Some(Utc::now() - Duration::seconds(60)))),
-            auth_type: AuthType::KiroDesktop,
             client: Client::new(),
             config_db: None,
             refresh_threshold: 300,
