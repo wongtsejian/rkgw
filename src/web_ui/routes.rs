@@ -2,14 +2,17 @@ use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
 use axum::{
-    extract::{Path, Query, State},
+    body::Body,
+    extract::{Query, State},
     http::{header, StatusCode},
-    response::{Html, IntoResponse, Response},
+    response::{IntoResponse, Response},
     Json,
 };
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sysinfo::{Pid, ProcessesToUpdate, System};
+
+use rust_embed::Embed;
 
 use crate::config::parse_debug_mode;
 use crate::error::ApiError;
@@ -18,30 +21,62 @@ use crate::web_ui::config_api::{
     classify_config_change, get_config_field_descriptions, validate_config_field, ChangeType,
 };
 
-/// GET /ui - Dashboard page
-pub async fn dashboard_page() -> Html<&'static str> {
-    Html(include_str!("templates/dashboard.html"))
+/// Embedded React SPA assets from web-ui/dist/
+#[derive(Embed)]
+#[folder = "web-ui/dist/"]
+struct WebAssets;
+
+fn mime_from_path(path: &str) -> &'static str {
+    match path.rsplit('.').next() {
+        Some("html") => "text/html; charset=utf-8",
+        Some("css") => "text/css; charset=utf-8",
+        Some("js") => "application/javascript; charset=utf-8",
+        Some("svg") => "image/svg+xml",
+        Some("png") => "image/png",
+        Some("ico") => "image/x-icon",
+        Some("json") => "application/json",
+        Some("woff2") => "font/woff2",
+        Some("woff") => "font/woff",
+        _ => "application/octet-stream",
+    }
 }
 
-/// GET /ui/config - Config page
-pub async fn config_page() -> Html<&'static str> {
-    Html(include_str!("templates/config.html"))
+/// Serve the SPA index page (root route).
+pub async fn spa_index() -> Response {
+    serve_embedded("index.html")
 }
 
-/// GET /ui/static/:filename - Serve static assets
-pub async fn static_asset(Path(filename): Path<String>) -> Response {
-    let (content, content_type) = match filename.as_str() {
-        "style.css" => (include_str!("static/style.css"), "text/css; charset=utf-8"),
-        "app.js" => (
-            include_str!("static/app.js"),
-            "application/javascript; charset=utf-8",
-        ),
-        _ => {
-            return (StatusCode::NOT_FOUND, "Not found").into_response();
-        }
-    };
+/// Fallback handler: serves embedded assets for /_ui/* paths,
+/// returns 404 for everything else.
+pub async fn spa_fallback(request: axum::http::Request<Body>) -> Response {
+    let path = request.uri().path();
+    if let Some(sub) = path.strip_prefix("/_ui/") {
+        serve_embedded(sub)
+    } else {
+        (StatusCode::NOT_FOUND, "Not found").into_response()
+    }
+}
 
-    ([(header::CONTENT_TYPE, content_type)], content).into_response()
+fn serve_embedded(path: &str) -> Response {
+    if let Some(file) = WebAssets::get(path) {
+        let content_type = mime_from_path(path);
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, content_type)],
+            file.data,
+        )
+            .into_response()
+    } else if let Some(file) = WebAssets::get("index.html") {
+        // SPA fallback: serve index.html for client-side routes
+        (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+            file.data,
+        )
+            .into_response()
+    } else {
+        (StatusCode::NOT_FOUND, "Not found").into_response()
+    }
 }
 
 /// GET /ui/api/metrics - Current metrics snapshot

@@ -587,6 +587,7 @@ mod tests {
             tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
+            allow_insecure: false,
             web_ui_enabled: false,
             database_url: None,
         }

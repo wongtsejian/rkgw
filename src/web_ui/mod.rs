@@ -73,14 +73,13 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .route("/config/schema", get(routes::get_config_schema))
         .with_state(state.clone());
 
-    // HTML pages + static assets (no auth)
+    // React SPA: root + static assets (no auth)
     let page_routes = Router::new()
-        .route("/", get(routes::dashboard_page))
-        .route("/config", get(routes::config_page))
-        .route("/assets/{filename}", get(routes::static_asset));
+        .route("/", get(routes::spa_index));
 
     Router::new()
         .nest("/_ui/api", authed_api_routes)
         .nest("/_ui/api", public_api_routes)
         .nest("/_ui", page_routes)
+        .fallback(get(routes::spa_fallback))
 }

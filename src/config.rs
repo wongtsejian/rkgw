@@ -8,9 +8,29 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct CliArgs {
+    /// Server host/bind address
+    #[arg(long, env = "SERVER_HOST", default_value = "127.0.0.1")]
+    pub host: String,
+
     /// Server port
     #[arg(short, long, env = "SERVER_PORT", default_value = "8000")]
     pub port: u16,
+
+    /// Proxy API key for client authentication
+    #[arg(long, env = "PROXY_API_KEY")]
+    pub proxy_api_key: Option<String>,
+
+    /// AWS region for Kiro API
+    #[arg(long, env = "KIRO_REGION", default_value = "us-east-1")]
+    pub kiro_region: String,
+
+    /// Log level
+    #[arg(long, env = "LOG_LEVEL", default_value = "info")]
+    pub log_level: String,
+
+    /// Debug mode (off, errors, all)
+    #[arg(long, env = "DEBUG_MODE", default_value = "off")]
+    pub debug_mode: String,
 
     /// PostgreSQL database URL for config persistence
     #[arg(long, env = "DATABASE_URL")]
@@ -24,9 +44,17 @@ pub struct CliArgs {
     #[arg(long, env = "TLS_KEY")]
     pub tls_key: Option<String>,
 
+    /// Enable TLS
+    #[arg(long, env = "TLS_ENABLED", default_value = "false")]
+    pub tls_enabled: bool,
+
     /// Enable web UI dashboard (served at /_ui/)
     #[arg(long, env = "WEB_UI", default_value = "true")]
     pub web_ui: bool,
+
+    /// Allow binding to non-localhost without TLS (e.g. behind Docker/reverse proxy)
+    #[arg(long, env = "ALLOW_INSECURE", default_value = "false")]
+    pub allow_insecure: bool,
 
     /// Enable monitoring dashboard TUI
     #[arg(long, default_value = "false")]
@@ -78,6 +106,7 @@ pub struct Config {
     pub tls_enabled: bool,
     pub tls_cert_path: Option<PathBuf>,
     pub tls_key_path: Option<PathBuf>,
+    pub allow_insecure: bool,
 
     // Web UI
     pub web_ui_enabled: bool,
@@ -131,6 +160,7 @@ impl Config {
             tls_enabled: false,
             tls_cert_path: None,
             tls_key_path: None,
+            allow_insecure: false,
             web_ui_enabled: true,
             database_url: None,
         }
@@ -149,18 +179,29 @@ impl Config {
 
         let mut config = Self::with_defaults();
 
-        // Apply CLI overrides
+        // Apply CLI / env overrides
+        config.server_host = args.host;
         config.server_port = args.port;
+        if let Some(key) = args.proxy_api_key {
+            config.proxy_api_key = key;
+        }
+        config.kiro_region = args.kiro_region;
+        config.log_level = args.log_level;
+        config.debug_mode = match args.debug_mode.to_lowercase().as_str() {
+            "errors" => DebugMode::Errors,
+            "all" => DebugMode::All,
+            _ => DebugMode::Off,
+        };
         config.dashboard = args.dashboard;
         config.web_ui_enabled = args.web_ui;
         config.tls_cert_path = args.tls_cert.map(|s| expand_tilde(&s));
         config.tls_key_path = args.tls_key.map(|s| expand_tilde(&s));
 
-        // Auto-enable TLS when cert+key are both provided
-        if config.tls_cert_path.is_some() && config.tls_key_path.is_some() {
-            config.tls_enabled = true;
-        }
+        // Enable TLS when explicitly set or when cert+key are both provided
+        config.tls_enabled =
+            args.tls_enabled || (config.tls_cert_path.is_some() && config.tls_key_path.is_some());
 
+        config.allow_insecure = args.allow_insecure;
         config.database_url = args.database_url;
 
         Ok(config)
@@ -199,10 +240,10 @@ impl Config {
             }
         }
 
-        // Require TLS for non-loopback IP bindings
+        // Require TLS for non-loopback IP bindings (unless explicitly bypassed)
         let is_loopback = self.server_host == "127.0.0.1" || self.server_host == "::1";
 
-        if !is_loopback && !self.is_tls_active() {
+        if !is_loopback && !self.is_tls_active() && !self.allow_insecure {
             if self.server_host == "localhost" {
                 tracing::warn!(
                     "Host 'localhost' requires TLS because only IP literals (127.0.0.1, ::1) are recognized as loopback. \

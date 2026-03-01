@@ -45,6 +45,9 @@ perf.data.old
 .security-key
 logs/security/
 
+# TLS certificates
+certs/
+
 # Claude Code
 .claude/
 .mcp.json
