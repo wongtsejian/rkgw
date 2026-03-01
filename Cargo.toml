@@ -58,8 +58,8 @@ chrono = { version = "0.4", features = ["serde"] }
 # Tokenization
 tiktoken-rs = "0.5"
 
-# SQLite support
-rusqlite = { version = "0.31", features = ["bundled"] }
+# PostgreSQL support
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres"] }
 
 # Embedded frontend assets
 rust-embed = "8"

@@ -66,7 +66,6 @@ fn create_test_app_state() -> AppState {
         server_port: 8080,
         proxy_api_key: "test-api-key-secret".to_string(),
         kiro_region: "us-east-1".to_string(),
-        kiro_cli_db_file: std::path::PathBuf::from("/tmp/test.db"),
         streaming_timeout: 300,
         token_refresh_threshold: 300,
         first_token_timeout: 15,
@@ -84,6 +83,8 @@ fn create_test_app_state() -> AppState {
         tls_enabled: false,
         tls_cert_path: None,
         tls_key_path: None,
+        database_url: None,
+        ..Config::with_defaults()
     });
 
     let metrics = Arc::new(MetricsCollector::new());

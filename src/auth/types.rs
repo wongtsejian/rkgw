@@ -65,21 +65,3 @@ pub struct AwsSsoOidcResponse {
     pub refresh_token: Option<String>,
     pub expires_in: Option<u64>,
 }
-
-/// SQLite token data
-#[derive(Deserialize)]
-pub struct SqliteTokenData {
-    pub access_token: Option<String>,
-    pub refresh_token: Option<String>,
-    pub expires_at: Option<String>,
-    pub region: Option<String>,
-    pub scopes: Option<Vec<String>>,
-}
-
-/// SQLite device registration data
-#[derive(Deserialize)]
-pub struct SqliteDeviceRegistration {
-    pub client_id: Option<String>,
-    pub client_secret: Option<String>,
-    pub region: Option<String>,
-}

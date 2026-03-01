@@ -2,6 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::io::IsTerminal;
 use std::path::PathBuf;
+// PathBuf is still needed for tls_cert_path / tls_key_path and expand_tilde().
 
 /// Kiro Gateway - Rust Implementation
 #[derive(Parser, Debug)]
@@ -11,9 +12,9 @@ pub struct CliArgs {
     #[arg(short, long, env = "SERVER_PORT", default_value = "8000")]
     pub port: u16,
 
-    /// Path to config database for persistence
-    #[arg(long, env = "CONFIG_DB")]
-    pub config_db: Option<String>,
+    /// PostgreSQL database URL for config persistence
+    #[arg(long, env = "DATABASE_URL")]
+    pub database_url: Option<String>,
 
     /// Path to TLS certificate file (PEM format)
     #[arg(long, env = "TLS_CERT")]
@@ -43,7 +44,6 @@ pub struct Config {
 
     // Kiro credentials
     pub kiro_region: String,
-    pub kiro_cli_db_file: PathBuf,
 
     // Timeouts
     #[allow(dead_code)]
@@ -81,7 +81,9 @@ pub struct Config {
 
     // Web UI
     pub web_ui_enabled: bool,
-    pub config_db_path: Option<PathBuf>,
+
+    // Database
+    pub database_url: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -111,7 +113,6 @@ impl Config {
             server_port: 8000,
             proxy_api_key: String::new(),
             kiro_region: "us-east-1".to_string(),
-            kiro_cli_db_file: PathBuf::new(),
             streaming_timeout: 300,
             token_refresh_threshold: 300,
             first_token_timeout: 15,
@@ -131,7 +132,7 @@ impl Config {
             tls_cert_path: None,
             tls_key_path: None,
             web_ui_enabled: true,
-            config_db_path: None,
+            database_url: None,
         }
     }
 
@@ -160,10 +161,7 @@ impl Config {
             config.tls_enabled = true;
         }
 
-        config.config_db_path = args
-            .config_db
-            .map(|s| expand_tilde(&s))
-            .or_else(|| dirs::home_dir().map(|h| h.join(".kiro-gateway").join("config.db")));
+        config.database_url = args.database_url;
 
         Ok(config)
     }

@@ -63,18 +63,15 @@ async fn main() -> Result<()> {
 
     tracing::info!("Kiro Gateway starting...");
 
-    // Open or create the config database
-    let config_db = if let Some(ref db_path) = config.config_db_path {
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent).ok();
-        }
-        match web_ui::config_db::ConfigDb::open(db_path) {
+    // Connect to the PostgreSQL config database
+    let config_db = if let Some(ref url) = config.database_url {
+        match web_ui::config_db::ConfigDb::connect(url).await {
             Ok(db) => {
-                tracing::info!("Config database opened: {}", db_path.display());
+                tracing::info!("Connected to PostgreSQL database");
                 Some(Arc::new(db))
             }
             Err(e) => {
-                tracing::warn!("Failed to open config database: {}", e);
+                tracing::warn!("Failed to connect to database: {}", e);
                 None
             }
         }
@@ -83,10 +80,11 @@ async fn main() -> Result<()> {
     };
 
     // Check if setup is complete
-    let setup_complete_flag = config_db
-        .as_ref()
-        .map(|db| db.is_setup_complete())
-        .unwrap_or(false);
+    let setup_complete_flag = if let Some(ref db) = config_db {
+        db.is_setup_complete().await
+    } else {
+        false
+    };
 
     let setup_complete = Arc::new(AtomicBool::new(setup_complete_flag));
 
@@ -94,6 +92,7 @@ async fn main() -> Result<()> {
         // Setup complete — load config from DB
         if let Some(ref db) = config_db {
             db.load_into_config(&mut config)
+                .await
                 .context("Failed to load config from database")?;
             tracing::info!("Configuration loaded from database");
         }
@@ -118,7 +117,7 @@ async fn main() -> Result<()> {
     let auth_manager = if setup_complete_flag {
         if let Some(ref db) = config_db {
             tracing::info!("Initializing authentication...");
-            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold) {
+            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
                 Ok(am) => {
                     let am = Arc::new(am);
                     // Test authentication by getting a token
@@ -228,7 +227,7 @@ async fn main() -> Result<()> {
     // The http_client retains its own Arc<AuthManager> for connection-level retries.
     let app_auth_manager = if setup_complete_flag {
         if let Some(ref db) = config_db {
-            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold) {
+            match auth::AuthManager::new(Arc::clone(db), config.token_refresh_threshold).await {
                 Ok(am) => am,
                 Err(_) => auth::AuthManager::new_placeholder(
                     config.kiro_region.clone(),

@@ -27,7 +27,7 @@ pub struct AuthManager {
     /// HTTP client for refresh requests
     client: Client,
 
-    /// Config database (for reloading credentials on 400 error)
+    /// Config database (for reloading credentials from PostgreSQL on 400 error)
     config_db: Option<Arc<ConfigDb>>,
 
     /// Token refresh threshold in seconds (default: 300 = 5 minutes)
@@ -108,9 +108,9 @@ impl AuthManager {
     ///
     /// Loads credentials (refresh token) from ConfigDb and uses KiroDesktop or
     /// AwsSsoOidc auth depending on whether client_id/secret are present.
-    pub fn new(config_db: Arc<ConfigDb>, refresh_threshold: u64) -> Result<Self> {
-        tracing::info!("Loading credentials from config database");
-        let credentials = credentials::load_from_config_db(&config_db)?;
+    pub async fn new(config_db: Arc<ConfigDb>, refresh_threshold: u64) -> Result<Self> {
+        tracing::info!("Loading credentials from database");
+        let credentials = credentials::load_from_config_db(&config_db).await?;
 
         let auth_type = credentials::detect_auth_type(&credentials);
 
@@ -163,8 +163,7 @@ impl AuthManager {
 
         let mut creds = self.credentials.write().await;
 
-        // First attempt: use refresh_with_retry (passes None for sqlite path
-        // since we no longer use kiro-cli SQLite in normal flow)
+        // First attempt: refresh using current credentials
         let result = match self.auth_type {
             AuthType::KiroDesktop => refresh::refresh_kiro_desktop(&self.client, &creds).await,
             AuthType::AwsSsoOidc => refresh::refresh_aws_sso_oidc(&self.client, &creds).await,
@@ -173,13 +172,14 @@ impl AuthManager {
         let token_data = match result {
             Ok(data) => data,
             Err(e) if e.to_string().contains("400") => {
-                // On 400 error, try reloading credentials from config DB
+                // On 400 error, try reloading credentials from database
                 if let Some(ref config_db) = self.config_db {
                     tracing::warn!(
-                        "Token refresh failed with 400, reloading credentials from config DB..."
+                        "Token refresh failed with 400, reloading credentials from database..."
                     );
                     *creds = credentials::load_from_config_db(config_db)
-                        .context("Failed to reload credentials from config DB")?;
+                        .await
+                        .context("Failed to reload credentials from database")?;
 
                     // Retry with fresh credentials
                     match self.auth_type {

@@ -18,7 +18,7 @@ pub fn classify_config_change(key: &str) -> ChangeType {
         | "tool_description_max_length"
         | "first_token_timeout" => ChangeType::HotReload,
         "server_host" | "server_port" | "tls_enabled" | "tls_cert_path" | "tls_key_path"
-        | "kiro_cli_db_file" | "proxy_api_key" => ChangeType::RequiresRestart,
+        | "proxy_api_key" => ChangeType::RequiresRestart,
         // Default unknown keys to restart for safety
         _ => ChangeType::RequiresRestart,
     }
@@ -116,7 +116,7 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
                 .ok_or_else(|| "first_token_timeout must be a positive integer".to_string())?;
             Ok(())
         }
-        "tls_cert_path" | "tls_key_path" | "kiro_cli_db_file" => {
+        "tls_cert_path" | "tls_key_path" => {
             value
                 .as_str()
                 .ok_or_else(|| format!("{} must be a string", key))?;
@@ -139,7 +139,6 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
         "API key required for client authentication",
     );
     m.insert("kiro_region", "AWS region for the Kiro API");
-    m.insert("kiro_cli_db_file", "Path to the kiro-cli SQLite database");
     m.insert(
         "log_level",
         "Logging verbosity: trace, debug, info, warn, error",
@@ -222,10 +221,6 @@ mod tests {
         );
         assert_eq!(
             classify_config_change("tls_key_path"),
-            ChangeType::RequiresRestart
-        );
-        assert_eq!(
-            classify_config_change("kiro_cli_db_file"),
             ChangeType::RequiresRestart
         );
         assert_eq!(
@@ -321,7 +316,6 @@ mod tests {
             "server_port",
             "proxy_api_key",
             "kiro_region",
-            "kiro_cli_db_file",
             "log_level",
             "debug_mode",
             "fake_reasoning_enabled",

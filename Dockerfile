@@ -8,9 +8,7 @@ RUN npm run build
 
 # Stage 2 — Compile the Rust binary (with embedded web UI assets)
 FROM rust:1-slim-bookworm AS rust-builder
-# pkg-config is needed for any remaining system-level probe; rusqlite uses
-# the "bundled" feature so SQLite is compiled from source (no system lib needed),
-# and rustls/rcgen are pure Rust so no system OpenSSL is required.
+# sqlx with runtime-tokio-rustls uses pure Rust TLS — no system PG or SSL libraries needed.
 RUN apt-get update && apt-get install -y pkg-config && rm -rf /var/lib/apt/lists/*
 WORKDIR /build
 COPY . .
@@ -25,8 +23,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y ca-certificates curl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=rust-builder /build/target/release/kiro-gateway /app/kiro-gateway
-# /data  — mount point for the config SQLite DB (named volume)
 # /certs — mount point for TLS cert + key (bind mount, operator-managed)
-RUN mkdir -p /data /certs
+RUN mkdir -p /certs
 EXPOSE 8000
 CMD ["/app/kiro-gateway"]

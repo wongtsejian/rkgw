@@ -1,9 +1,7 @@
 use std::collections::HashMap;
-use std::path::Path;
-use std::sync::Mutex;
 
 use anyhow::{Context, Result};
-use rusqlite::params;
+use sqlx::PgPool;
 
 use crate::config::{Config, DebugMode};
 
@@ -17,192 +15,190 @@ pub struct ConfigChange {
     pub source: String,
 }
 
-/// SQLite-backed configuration persistence.
+/// PostgreSQL-backed configuration persistence.
 pub struct ConfigDb {
-    conn: Mutex<rusqlite::Connection>,
+    pool: PgPool,
 }
 
 impl ConfigDb {
-    /// Open (or create) the config database at `path` and run migrations.
-    /// On Unix systems, sets restrictive permissions (0o700 on parent dir, 0o600 on DB file).
-    pub fn open(path: &Path) -> Result<Self> {
-        let conn = rusqlite::Connection::open(path)
-            .with_context(|| format!("Failed to open config database: {}", path.display()))?;
-
-        // Set restrictive file permissions on Unix (DB contains secrets)
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if let Some(parent) = path.parent() {
-                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700)).ok();
-            }
-            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).ok();
-        }
-
-        let db = Self {
-            conn: Mutex::new(conn),
-        };
-        db.run_migrations()?;
+    /// Connect to the PostgreSQL database and run migrations.
+    pub async fn connect(database_url: &str) -> Result<Self> {
+        let pool = PgPool::connect(database_url)
+            .await
+            .context("Failed to connect to PostgreSQL")?;
+        let db = Self { pool };
+        db.run_migrations().await?;
         Ok(db)
     }
 
     /// Create tables if they don't already exist.
-    fn run_migrations(&self) -> Result<()> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-
-        conn.execute_batch(
+    async fn run_migrations(&self) -> Result<()> {
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS schema_version (
                 version    INTEGER NOT NULL,
-                applied_at TEXT    NOT NULL DEFAULT (datetime('now'))
-            );
+                applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create schema_version table")?;
 
-            CREATE TABLE IF NOT EXISTS config (
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS config (
                 key         TEXT PRIMARY KEY NOT NULL,
                 value       TEXT NOT NULL,
                 value_type  TEXT NOT NULL DEFAULT 'string',
-                updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 description TEXT
-            );
+            )",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create config table")?;
 
-            CREATE TABLE IF NOT EXISTS config_history (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS config_history (
+                id         SERIAL PRIMARY KEY,
                 key        TEXT NOT NULL,
                 old_value  TEXT,
                 new_value  TEXT NOT NULL,
-                changed_at TEXT NOT NULL DEFAULT (datetime('now')),
+                changed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 source     TEXT NOT NULL DEFAULT 'web_ui'
-            );",
+            )",
         )
-        .context("Failed to run config database migrations")?;
+        .execute(&self.pool)
+        .await
+        .context("Failed to create config_history table")?;
 
         // Record schema version 1 if not present
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
-            .unwrap_or(0);
+        let count: Option<i64> = sqlx::query_scalar("SELECT COUNT(*) FROM schema_version")
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(Some(0));
 
-        if count == 0 {
-            conn.execute(
-                "INSERT INTO schema_version (version) VALUES (?)",
-                params![1],
-            )
-            .context("Failed to insert schema version")?;
+        if count.unwrap_or(0) == 0 {
+            sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+                .bind(1_i32)
+                .execute(&self.pool)
+                .await
+                .context("Failed to insert schema version")?;
         }
 
         Ok(())
     }
 
     /// Get a single config value by key.
-    pub fn get(&self, key: &str) -> Result<Option<String>> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-        let mut stmt = conn
-            .prepare("SELECT value FROM config WHERE key = ?")
-            .context("Failed to prepare get query")?;
-
-        let result = stmt.query_row(params![key], |row| row.get(0)).ok();
+    pub async fn get(&self, key: &str) -> Result<Option<String>> {
+        let result: Option<String> = sqlx::query_scalar("SELECT value FROM config WHERE key = $1")
+            .bind(key)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to query config value")?;
 
         Ok(result)
     }
 
     /// Upsert a config value and record the change in history.
     /// All operations (read old value, upsert, history insert, prune) run in a single transaction.
-    pub fn set(&self, key: &str, value: &str, source: &str) -> Result<()> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-        let tx = conn
-            .unchecked_transaction()
+    pub async fn set(&self, key: &str, value: &str, source: &str) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .context("Failed to begin transaction for config set")?;
 
         // Fetch old value for history
-        let old_value: Option<String> = tx
-            .query_row(
-                "SELECT value FROM config WHERE key = ?",
-                params![key],
-                |row| row.get(0),
-            )
-            .ok();
+        let old_value: Option<String> =
+            sqlx::query_scalar("SELECT value FROM config WHERE key = $1")
+                .bind(key)
+                .fetch_optional(&mut *tx)
+                .await
+                .context("Failed to fetch old config value")?;
 
-        tx.execute(
+        sqlx::query(
             "INSERT INTO config (key, value, updated_at)
-             VALUES (?, ?, datetime('now'))
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            params![key, value],
+             VALUES ($1, $2, NOW())
+             ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
         )
+        .bind(key)
+        .bind(value)
+        .execute(&mut *tx)
+        .await
         .with_context(|| format!("Failed to upsert config key '{}'", key))?;
 
-        tx.execute(
+        sqlx::query(
             "INSERT INTO config_history (key, old_value, new_value, source)
-             VALUES (?, ?, ?, ?)",
-            params![key, old_value, value, source],
+             VALUES ($1, $2, $3, $4)",
         )
+        .bind(key)
+        .bind(&old_value)
+        .bind(value)
+        .bind(source)
+        .execute(&mut *tx)
+        .await
         .with_context(|| format!("Failed to record config history for '{}'", key))?;
 
         // Prune old history entries, keeping the most recent 1000
-        tx.execute(
+        sqlx::query(
             "DELETE FROM config_history WHERE id NOT IN (SELECT id FROM config_history ORDER BY id DESC LIMIT 1000)",
-            [],
         )
+        .execute(&mut *tx)
+        .await
         .context("Failed to prune config history")?;
 
         tx.commit()
+            .await
             .context("Failed to commit config set transaction")?;
 
         Ok(())
     }
 
     /// Get all config key-value pairs.
-    pub fn get_all(&self) -> Result<HashMap<String, String>> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-        let mut stmt = conn
-            .prepare("SELECT key, value FROM config")
-            .context("Failed to prepare get_all query")?;
-
-        let rows = stmt
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
+    pub async fn get_all(&self) -> Result<HashMap<String, String>> {
+        let rows: Vec<(String, String)> = sqlx::query_as("SELECT key, value FROM config")
+            .fetch_all(&self.pool)
+            .await
             .context("Failed to query all config")?;
 
         let mut map = HashMap::new();
-        for row in rows {
-            let (k, v) = row.context("Failed to read config row")?;
+        for (k, v) in rows {
             map.insert(k, v);
         }
         Ok(map)
     }
 
     /// Get recent config change history.
-    pub fn get_history(&self, limit: usize) -> Result<Vec<ConfigChange>> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-        let mut stmt = conn
-            .prepare(
-                "SELECT key, old_value, new_value, changed_at, source
-                 FROM config_history
-                 ORDER BY id DESC
-                 LIMIT ?",
+    pub async fn get_history(&self, limit: usize) -> Result<Vec<ConfigChange>> {
+        let rows: Vec<(String, Option<String>, String, String, String)> = sqlx::query_as(
+            "SELECT key, old_value, new_value, changed_at::TEXT, source
+             FROM config_history
+             ORDER BY id DESC
+             LIMIT $1",
+        )
+        .bind(limit as i64)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to query config history")?;
+
+        let changes = rows
+            .into_iter()
+            .map(
+                |(key, old_value, new_value, changed_at, source)| ConfigChange {
+                    key,
+                    old_value,
+                    new_value,
+                    changed_at,
+                    source,
+                },
             )
-            .context("Failed to prepare history query")?;
+            .collect();
 
-        let rows = stmt
-            .query_map(params![limit as i64], |row| {
-                Ok(ConfigChange {
-                    key: row.get(0)?,
-                    old_value: row.get(1)?,
-                    new_value: row.get(2)?,
-                    changed_at: row.get(3)?,
-                    source: row.get(4)?,
-                })
-            })
-            .context("Failed to query config history")?;
-
-        let mut changes = Vec::new();
-        for row in rows {
-            changes.push(row.context("Failed to read history row")?);
-        }
         Ok(changes)
     }
 
     /// Overlay persisted config values onto an existing Config struct.
-    pub fn load_into_config(&self, config: &mut Config) -> Result<()> {
-        let all = self.get_all()?;
+    pub async fn load_into_config(&self, config: &mut Config) -> Result<()> {
+        let all = self.get_all().await?;
 
         for (key, value) in &all {
             match key.as_str() {
@@ -258,9 +254,6 @@ impl ConfigDb {
                 "tls_key_path" => {
                     config.tls_key_path = Some(std::path::PathBuf::from(value));
                 }
-                "kiro_cli_db_file" => {
-                    config.kiro_cli_db_file = std::path::PathBuf::from(value);
-                }
                 _ => {}
             }
         }
@@ -269,23 +262,29 @@ impl ConfigDb {
     }
 
     /// Check if initial setup has been completed (proxy_api_key and kiro_refresh_token both exist).
-    pub fn is_setup_complete(&self) -> bool {
-        let has_key = self.get("proxy_api_key").ok().flatten().is_some();
-        let has_token = self.get("kiro_refresh_token").ok().flatten().is_some();
+    pub async fn is_setup_complete(&self) -> bool {
+        let has_key = self.get("proxy_api_key").await.ok().flatten().is_some();
+        let has_token = self
+            .get("kiro_refresh_token")
+            .await
+            .ok()
+            .flatten()
+            .is_some();
         has_key && has_token
     }
 
     /// Save initial setup configuration (proxy key, refresh token, region).
-    /// All four writes are wrapped in a single transaction for atomicity.
-    pub fn save_initial_setup(
+    /// All writes are wrapped in a single transaction for atomicity.
+    pub async fn save_initial_setup(
         &self,
         proxy_key: &str,
         refresh_token: &str,
         region: &str,
     ) -> Result<()> {
-        let conn = self.conn.lock().expect("config db mutex poisoned");
-        let tx = conn
-            .unchecked_transaction()
+        let mut tx = self
+            .pool
+            .begin()
+            .await
             .context("Failed to begin transaction for initial setup")?;
 
         let keys_values: &[(&str, &str)] = &[
@@ -296,61 +295,70 @@ impl ConfigDb {
         ];
 
         for &(key, value) in keys_values {
-            let old_value: Option<String> = tx
-                .query_row(
-                    "SELECT value FROM config WHERE key = ?",
-                    params![key],
-                    |row| row.get(0),
-                )
-                .ok();
+            let old_value: Option<String> =
+                sqlx::query_scalar("SELECT value FROM config WHERE key = $1")
+                    .bind(key)
+                    .fetch_optional(&mut *tx)
+                    .await
+                    .context("Failed to fetch old config value during setup")?;
 
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO config (key, value, updated_at)
-                 VALUES (?, ?, datetime('now'))
-                 ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-                params![key, value],
+                 VALUES ($1, $2, NOW())
+                 ON CONFLICT(key) DO UPDATE SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at",
             )
+            .bind(key)
+            .bind(value)
+            .execute(&mut *tx)
+            .await
             .with_context(|| format!("Failed to upsert config key '{}' during setup", key))?;
 
-            tx.execute(
+            sqlx::query(
                 "INSERT INTO config_history (key, old_value, new_value, source)
-                 VALUES (?, ?, ?, ?)",
-                params![key, old_value, value, "setup"],
+                 VALUES ($1, $2, $3, $4)",
             )
+            .bind(key)
+            .bind(&old_value)
+            .bind(value)
+            .bind("setup")
+            .execute(&mut *tx)
+            .await
             .with_context(|| {
                 format!("Failed to record config history for '{}' during setup", key)
             })?;
         }
 
         tx.commit()
+            .await
             .context("Failed to commit initial setup transaction")?;
 
         Ok(())
     }
 
     /// Get the stored Kiro refresh token.
-    pub fn get_refresh_token(&self) -> Result<Option<String>> {
-        self.get("kiro_refresh_token")
+    pub async fn get_refresh_token(&self) -> Result<Option<String>> {
+        self.get("kiro_refresh_token").await
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
 
-    fn create_test_db() -> (ConfigDb, PathBuf) {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-
-        let path = std::env::temp_dir().join(format!(
-            "test_config_db_{}_{}.sqlite",
-            std::process::id(),
-            COUNTER.fetch_add(1, Ordering::Relaxed)
-        ));
-        let db = ConfigDb::open(&path).unwrap();
-        (db, path)
+    /// Connect to a test PostgreSQL database. Returns None if DATABASE_URL is not set.
+    async fn setup_test_db() -> Option<ConfigDb> {
+        let url = std::env::var("DATABASE_URL").ok()?;
+        let db = ConfigDb::connect(&url).await.ok()?;
+        // Clean tables for a fresh test
+        sqlx::query("DELETE FROM config_history")
+            .execute(&db.pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM config")
+            .execute(&db.pool)
+            .await
+            .ok();
+        Some(db)
     }
 
     fn create_test_config() -> Config {
@@ -360,65 +368,75 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_open_creates_tables() {
-        let (db, _tmp) = create_test_db();
-        let conn = db.conn.lock().unwrap();
-        // Verify tables exist by querying them
-        let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM schema_version", [], |row| row.get(0))
+    #[tokio::test]
+    async fn test_connect_creates_tables() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        let count: Option<i64> = sqlx::query_scalar("SELECT COUNT(*) FROM schema_version")
+            .fetch_one(&db.pool)
+            .await
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, Some(1));
     }
 
-    #[test]
-    fn test_set_and_get() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("log_level", "debug", "test").unwrap();
-        let val = db.get("log_level").unwrap();
+    #[tokio::test]
+    async fn test_set_and_get() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("log_level", "debug", "test").await.unwrap();
+        let val = db.get("log_level").await.unwrap();
         assert_eq!(val, Some("debug".to_string()));
     }
 
-    #[test]
-    fn test_get_missing_key() {
-        let (db, _tmp) = create_test_db();
-        let val = db.get("nonexistent").unwrap();
+    #[tokio::test]
+    async fn test_get_missing_key() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        let val = db.get("nonexistent").await.unwrap();
         assert_eq!(val, None);
     }
 
-    #[test]
-    fn test_set_upsert() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("log_level", "info", "test").unwrap();
-        db.set("log_level", "debug", "test").unwrap();
-
-        let val = db.get("log_level").unwrap();
+    #[tokio::test]
+    async fn test_set_upsert() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("log_level", "info", "test").await.unwrap();
+        db.set("log_level", "debug", "test").await.unwrap();
+        let val = db.get("log_level").await.unwrap();
         assert_eq!(val, Some("debug".to_string()));
     }
 
-    #[test]
-    fn test_get_all() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("key1", "val1", "test").unwrap();
-        db.set("key2", "val2", "test").unwrap();
-
-        let all = db.get_all().unwrap();
+    #[tokio::test]
+    async fn test_get_all() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("key1", "val1", "test").await.unwrap();
+        db.set("key2", "val2", "test").await.unwrap();
+        let all = db.get_all().await.unwrap();
         assert_eq!(all.len(), 2);
         assert_eq!(all.get("key1").unwrap(), "val1");
         assert_eq!(all.get("key2").unwrap(), "val2");
     }
 
-    #[test]
-    fn test_get_history() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("log_level", "info", "init").unwrap();
-        db.set("log_level", "debug", "web_ui").unwrap();
-
-        let history = db.get_history(10).unwrap();
+    #[tokio::test]
+    async fn test_get_history() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("log_level", "info", "init").await.unwrap();
+        db.set("log_level", "debug", "web_ui").await.unwrap();
+        let history = db.get_history(10).await.unwrap();
         assert_eq!(history.len(), 2);
 
         // Most recent first
@@ -433,112 +451,142 @@ mod tests {
         assert_eq!(history[1].source, "init");
     }
 
-    #[test]
-    fn test_get_history_limit() {
-        let (db, _tmp) = create_test_db();
-
+    #[tokio::test]
+    async fn test_get_history_limit() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
         for i in 0..5 {
-            db.set("key", &format!("val{}", i), "test").unwrap();
+            db.set("key", &format!("val{}", i), "test").await.unwrap();
         }
-
-        let history = db.get_history(2).unwrap();
+        let history = db.get_history(2).await.unwrap();
         assert_eq!(history.len(), 2);
     }
 
-    #[test]
-    fn test_set_and_load_config() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("log_level", "info", "test").unwrap();
-        db.set("server_port", "8000", "test").unwrap();
-        db.set("fake_reasoning_enabled", "true", "test").unwrap();
-        db.set("truncation_recovery", "true", "test").unwrap();
+    #[tokio::test]
+    async fn test_set_and_load_config() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("log_level", "info", "test").await.unwrap();
+        db.set("server_port", "8000", "test").await.unwrap();
+        db.set("fake_reasoning_enabled", "true", "test")
+            .await
+            .unwrap();
+        db.set("truncation_recovery", "true", "test").await.unwrap();
 
         let mut loaded = create_test_config();
         loaded.log_level = "changed".to_string();
         loaded.server_port = 9999;
 
-        db.load_into_config(&mut loaded).unwrap();
+        db.load_into_config(&mut loaded).await.unwrap();
 
         assert_eq!(loaded.log_level, "info");
         assert_eq!(loaded.server_port, 8000);
-        assert_eq!(loaded.fake_reasoning_enabled, true);
-        assert_eq!(loaded.truncation_recovery, true);
+        assert!(loaded.fake_reasoning_enabled);
+        assert!(loaded.truncation_recovery);
     }
 
-    #[test]
-    fn test_load_into_config_debug_mode() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("debug_mode", "errors", "test").unwrap();
-
+    #[tokio::test]
+    async fn test_load_into_config_debug_mode() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("debug_mode", "errors", "test").await.unwrap();
         let mut config = create_test_config();
-        db.load_into_config(&mut config).unwrap();
-
+        db.load_into_config(&mut config).await.unwrap();
         assert_eq!(config.debug_mode, DebugMode::Errors);
     }
 
-    #[test]
-    fn test_is_setup_complete_false_when_empty() {
-        let (db, _tmp) = create_test_db();
-        assert!(!db.is_setup_complete());
+    #[tokio::test]
+    async fn test_is_setup_complete_false_when_empty() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        assert!(!db.is_setup_complete().await);
     }
 
-    #[test]
-    fn test_is_setup_complete_false_with_only_key() {
-        let (db, _tmp) = create_test_db();
-        db.set("proxy_api_key", "test-key", "test").unwrap();
-        assert!(!db.is_setup_complete());
+    #[tokio::test]
+    async fn test_is_setup_complete_false_with_only_key() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("proxy_api_key", "test-key", "test").await.unwrap();
+        assert!(!db.is_setup_complete().await);
     }
 
-    #[test]
-    fn test_is_setup_complete_true() {
-        let (db, _tmp) = create_test_db();
-        db.set("proxy_api_key", "test-key", "test").unwrap();
-        db.set("kiro_refresh_token", "test-token", "test").unwrap();
-        assert!(db.is_setup_complete());
+    #[tokio::test]
+    async fn test_is_setup_complete_true() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("proxy_api_key", "test-key", "test").await.unwrap();
+        db.set("kiro_refresh_token", "test-token", "test")
+            .await
+            .unwrap();
+        assert!(db.is_setup_complete().await);
     }
 
-    #[test]
-    fn test_save_initial_setup() {
-        let (db, _tmp) = create_test_db();
+    #[tokio::test]
+    async fn test_save_initial_setup() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
         db.save_initial_setup("my-key", "my-token", "us-west-2")
+            .await
             .unwrap();
 
-        assert_eq!(db.get("proxy_api_key").unwrap(), Some("my-key".to_string()));
         assert_eq!(
-            db.get("kiro_refresh_token").unwrap(),
+            db.get("proxy_api_key").await.unwrap(),
+            Some("my-key".to_string())
+        );
+        assert_eq!(
+            db.get("kiro_refresh_token").await.unwrap(),
             Some("my-token".to_string())
         );
         assert_eq!(
-            db.get("kiro_region").unwrap(),
+            db.get("kiro_region").await.unwrap(),
             Some("us-west-2".to_string())
         );
-        assert_eq!(db.get("setup_complete").unwrap(), Some("true".to_string()));
-        assert!(db.is_setup_complete());
+        assert_eq!(
+            db.get("setup_complete").await.unwrap(),
+            Some("true".to_string())
+        );
+        assert!(db.is_setup_complete().await);
     }
 
-    #[test]
-    fn test_get_refresh_token() {
-        let (db, _tmp) = create_test_db();
-
-        assert_eq!(db.get_refresh_token().unwrap(), None);
-
-        db.set("kiro_refresh_token", "my-token", "test").unwrap();
+    #[tokio::test]
+    async fn test_get_refresh_token() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        assert_eq!(db.get_refresh_token().await.unwrap(), None);
+        db.set("kiro_refresh_token", "my-token", "test")
+            .await
+            .unwrap();
         assert_eq!(
-            db.get_refresh_token().unwrap(),
+            db.get_refresh_token().await.unwrap(),
             Some("my-token".to_string())
         );
     }
 
-    #[test]
-    fn test_load_into_config_ignores_unknown_keys() {
-        let (db, _tmp) = create_test_db();
-
-        db.set("unknown_key", "whatever", "test").unwrap();
-
+    #[tokio::test]
+    async fn test_load_into_config_ignores_unknown_keys() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("unknown_key", "whatever", "test").await.unwrap();
         let mut config = create_test_config();
         // Should not panic
-        db.load_into_config(&mut config).unwrap();
+        db.load_into_config(&mut config).await.unwrap();
     }
 }

@@ -141,17 +141,21 @@ fn mask_sensitive(value: &str) -> String {
 
 /// GET /ui/api/config - Current configuration (with masked secrets and setup status)
 pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
-    let config = state.config.read().unwrap();
     let setup_complete = state.setup_complete.load(Ordering::Relaxed);
+
+    // Clone the config snapshot and drop the read guard before any .await
+    let config = state.config.read().unwrap().clone();
 
     let masked_key = mask_sensitive(&config.proxy_api_key);
 
-    let masked_refresh_token = state
-        .config_db
-        .as_ref()
-        .and_then(|db| db.get_refresh_token().ok().flatten())
-        .map(|t| mask_sensitive(&t))
-        .unwrap_or_default();
+    let masked_refresh_token = if let Some(ref db) = state.config_db {
+        match db.get_refresh_token().await {
+            Ok(Some(t)) => mask_sensitive(&t),
+            _ => String::new(),
+        }
+    } else {
+        String::new()
+    };
 
     Json(json!({
         "setup_complete": setup_complete,
@@ -202,6 +206,7 @@ pub async fn update_config(
             };
             config_db
                 .set(key, &value_str, "web_ui")
+                .await
                 .map_err(ApiError::Internal)?;
         }
     }
@@ -342,11 +347,10 @@ pub async fn setup(
         })?
         .clone();
 
-    if let Err(e) = config_db_ref.save_initial_setup(
-        &body.proxy_api_key,
-        &body.kiro_refresh_token,
-        &body.region,
-    ) {
+    if let Err(e) = config_db_ref
+        .save_initial_setup(&body.proxy_api_key, &body.kiro_refresh_token, &body.region)
+        .await
+    {
         state.setup_complete.store(false, Ordering::SeqCst);
         return Err(ApiError::Internal(e));
     }
@@ -363,7 +367,7 @@ pub async fn setup(
         let cfg = state.config.read().unwrap_or_else(|p| p.into_inner());
         cfg.token_refresh_threshold
     };
-    match crate::auth::AuthManager::new(config_db_ref, threshold) {
+    match crate::auth::AuthManager::new(config_db_ref, threshold).await {
         Ok(new_auth) => {
             let mut auth_lock = state.auth_manager.write().await;
             *auth_lock = new_auth;
@@ -437,7 +441,10 @@ pub async fn get_config_history(
     let limit = params.limit.unwrap_or(50);
 
     if let Some(ref config_db) = state.config_db {
-        let history = config_db.get_history(limit).map_err(ApiError::Internal)?;
+        let history = config_db
+            .get_history(limit)
+            .await
+            .map_err(ApiError::Internal)?;
 
         let entries: Vec<Value> = history
             .iter()

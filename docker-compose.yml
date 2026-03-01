@@ -1,4 +1,20 @@
 services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: kiro_gateway
+      POSTGRES_USER: kiro
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kiro_secret}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kiro -d kiro_gateway"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   gateway:
     build:
       context: .
@@ -11,19 +27,16 @@ services:
       - .env
     environment:
       # These override any matching keys from .env — do not change them.
-      SERVER_HOST: "0.0.0.0"     # Must be 0.0.0.0 inside Docker
-      TLS_ENABLED: "true"        # Required for non-loopback binding (see src/config.rs:294-310)
-      KIRO_CLI_DB_FILE: /kiro-data.db
-      CONFIG_DB: /data/config.db
+      SERVER_HOST: "0.0.0.0"
+      TLS_ENABLED: "true"
+      DATABASE_URL: postgres://kiro:${POSTGRES_PASSWORD:-kiro_secret}@db:5432/kiro_gateway
       TLS_CERT: /certs/cert.pem
       TLS_KEY: /certs/key.pem
     volumes:
-      # Auth DB — synced from your local machine (read-only; gateway only reads tokens)
-      - ./kiro-data.db:/kiro-data.db:ro
-      # Config DB — persisted across container restarts via named volume
-      - config-db:/data
-      # TLS certificates — bind mount so you control cert lifecycle
       - ./certs:/certs:ro
+    depends_on:
+      db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-fsk", "https://localhost:${SERVER_PORT:-8000}/health"]
       interval: 30s
@@ -32,4 +45,4 @@ services:
       start_period: 20s
 
 volumes:
-  config-db:
+  pgdata:
