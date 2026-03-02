@@ -211,6 +211,7 @@ pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
                 String::new()
             },
             "streaming_timeout": config.streaming_timeout,
+            "token_refresh_threshold": config.token_refresh_threshold,
             "first_token_timeout": config.first_token_timeout,
             "http_max_connections": config.http_max_connections,
             "http_connect_timeout": config.http_connect_timeout,
@@ -452,7 +453,13 @@ pub async fn get_config_schema() -> Json<Value> {
             "server_port"
             | "fake_reasoning_max_tokens"
             | "tool_description_max_length"
-            | "first_token_timeout" => {
+            | "first_token_timeout"
+            | "streaming_timeout"
+            | "token_refresh_threshold"
+            | "http_max_connections"
+            | "http_connect_timeout"
+            | "http_request_timeout"
+            | "http_max_retries" => {
                 field.insert("type".to_string(), json!("number"));
             }
             "fake_reasoning_enabled" | "truncation_recovery" => {

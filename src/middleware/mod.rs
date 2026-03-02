@@ -27,6 +27,13 @@ pub async fn auth_middleware(
         .proxy_api_key
         .clone();
 
+    // Reject all requests when no API key is configured (pre-setup)
+    if proxy_api_key.is_empty() {
+        return Err(ApiError::AuthError(
+            "Setup not complete — no API key configured".to_string(),
+        ));
+    }
+
     if let Some(auth_header) = request.headers().get("authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
             tracing::debug!("Received Authorization header: Bearer ****");
@@ -241,6 +248,25 @@ mod tests {
         let request = Request::builder()
             .uri("/test")
             .header("authorization", "test-key-123")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_auth_middleware_with_empty_key() {
+        let mut state = create_test_state();
+        state.config = Arc::new(std::sync::RwLock::new(Config {
+            proxy_api_key: String::new(),
+            ..Config::with_defaults()
+        }));
+        let app = create_test_app(state);
+
+        let request = Request::builder()
+            .uri("/test")
+            .header("authorization", "Bearer ")
             .body(Body::empty())
             .unwrap();
 

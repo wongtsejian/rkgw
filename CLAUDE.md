@@ -25,10 +25,9 @@ cargo test --features test-utils    # Integration tests
 
 ## Required Environment Variables
 
-Set in `.env` or export:
-- `PROXY_API_KEY` - Password to protect the proxy server (configured via Web UI setup)
+Set in `.env` or export (bootstrap-only — all runtime config is managed via the Web UI):
 - `DATABASE_URL` - PostgreSQL connection string (e.g. `postgres://user:pass@localhost:5432/kiro_gateway`)
-- `KIRO_REGION` - AWS region (default: `us-east-1`)
+- `SERVER_HOST` / `SERVER_PORT` - Bind address and port (defaults: `127.0.0.1:8000`)
 
 ## Architecture
 

@@ -18,7 +18,9 @@ pub fn classify_config_change(key: &str) -> ChangeType {
         | "tool_description_max_length"
         | "first_token_timeout" => ChangeType::HotReload,
         "server_host" | "server_port" | "tls_cert_path" | "tls_key_path"
-        | "proxy_api_key" => ChangeType::RequiresRestart,
+        | "proxy_api_key" | "streaming_timeout" | "token_refresh_threshold"
+        | "http_max_connections" | "http_connect_timeout" | "http_request_timeout"
+        | "http_max_retries" => ChangeType::RequiresRestart,
         // Default unknown keys to restart for safety
         _ => ChangeType::RequiresRestart,
     }
@@ -92,28 +94,72 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
             }
         }
         "fake_reasoning_max_tokens" => {
-            value
+            let n = value
                 .as_u64()
                 .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
                 .ok_or_else(|| {
                     "fake_reasoning_max_tokens must be a positive integer".to_string()
                 })?;
+            if n == 0 || n > 1_000_000 {
+                return Err(
+                    "fake_reasoning_max_tokens must be between 1 and 1000000".to_string(),
+                );
+            }
             Ok(())
         }
         "tool_description_max_length" => {
-            value
+            let n = value
                 .as_u64()
                 .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
                 .ok_or_else(|| {
                     "tool_description_max_length must be a positive integer".to_string()
                 })?;
+            if n == 0 || n > 1_000_000 {
+                return Err(
+                    "tool_description_max_length must be between 1 and 1000000".to_string(),
+                );
+            }
             Ok(())
         }
         "first_token_timeout" => {
-            value
+            let n = value
                 .as_u64()
                 .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
                 .ok_or_else(|| "first_token_timeout must be a positive integer".to_string())?;
+            if n == 0 || n > 86400 {
+                return Err("first_token_timeout must be between 1 and 86400".to_string());
+            }
+            Ok(())
+        }
+        "streaming_timeout" | "token_refresh_threshold" | "http_connect_timeout"
+        | "http_request_timeout" => {
+            let n = value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
+                .ok_or_else(|| format!("{} must be a positive integer", key))?;
+            if n == 0 || n > 86400 {
+                return Err(format!("{} must be between 1 and 86400", key));
+            }
+            Ok(())
+        }
+        "http_max_connections" => {
+            let n = value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
+                .ok_or_else(|| "http_max_connections must be a positive integer".to_string())?;
+            if n == 0 || n > 1000 {
+                return Err("http_max_connections must be between 1 and 1000".to_string());
+            }
+            Ok(())
+        }
+        "http_max_retries" => {
+            let n = value
+                .as_u64()
+                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
+                .ok_or_else(|| "http_max_retries must be a non-negative integer".to_string())?;
+            if n > 10 {
+                return Err("http_max_retries must be between 0 and 10".to_string());
+            }
             Ok(())
         }
         "tls_cert_path" | "tls_key_path" => {
@@ -163,6 +209,30 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
     m.insert(
         "first_token_timeout",
         "Seconds to wait for the first token before timing out",
+    );
+    m.insert(
+        "streaming_timeout",
+        "Seconds before a streaming response times out",
+    );
+    m.insert(
+        "token_refresh_threshold",
+        "Seconds before token expiry to trigger a refresh",
+    );
+    m.insert(
+        "http_max_connections",
+        "Maximum concurrent outbound HTTP connections (1-1000)",
+    );
+    m.insert(
+        "http_connect_timeout",
+        "Seconds to wait for an outbound TCP connection",
+    );
+    m.insert(
+        "http_request_timeout",
+        "Seconds before an outbound HTTP request times out",
+    );
+    m.insert(
+        "http_max_retries",
+        "Retry attempts for failed upstream requests (0-10)",
     );
     m.insert("tls_cert_path", "Path to custom TLS certificate file (PEM). Optional — self-signed cert used when not set");
     m.insert("tls_key_path", "Path to custom TLS private key file (PEM). Optional — self-signed key used when not set");
@@ -240,6 +310,30 @@ mod tests {
         );
         assert_eq!(
             classify_config_change("proxy_api_key"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("streaming_timeout"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("token_refresh_threshold"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("http_max_connections"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("http_connect_timeout"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("http_request_timeout"),
+            ChangeType::RequiresRestart
+        );
+        assert_eq!(
+            classify_config_change("http_max_retries"),
             ChangeType::RequiresRestart
         );
     }
@@ -323,6 +417,72 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_http_max_connections() {
+        assert!(validate_config_field("http_max_connections", &json!(20)).is_ok());
+        assert!(validate_config_field("http_max_connections", &json!(1)).is_ok());
+        assert!(validate_config_field("http_max_connections", &json!(1000)).is_ok());
+        assert!(validate_config_field("http_max_connections", &json!(0)).is_err());
+        assert!(validate_config_field("http_max_connections", &json!(1001)).is_err());
+    }
+
+    #[test]
+    fn test_validate_http_max_retries() {
+        assert!(validate_config_field("http_max_retries", &json!(0)).is_ok());
+        assert!(validate_config_field("http_max_retries", &json!(10)).is_ok());
+        assert!(validate_config_field("http_max_retries", &json!(11)).is_err());
+    }
+
+    #[test]
+    fn test_validate_timeout_fields() {
+        for key in &[
+            "streaming_timeout",
+            "token_refresh_threshold",
+            "http_connect_timeout",
+            "http_request_timeout",
+        ] {
+            assert!(validate_config_field(key, &json!(100)).is_ok());
+            assert!(validate_config_field(key, &json!("200")).is_ok());
+            assert!(validate_config_field(key, &json!("abc")).is_err());
+            assert!(validate_config_field(key, &json!(0)).is_err());
+            assert!(validate_config_field(key, &json!(86401)).is_err());
+        }
+        // first_token_timeout has the same bounds
+        assert!(validate_config_field("first_token_timeout", &json!(0)).is_err());
+        assert!(validate_config_field("first_token_timeout", &json!(86401)).is_err());
+    }
+
+    #[test]
+    fn test_validate_http_max_connections_string() {
+        assert!(validate_config_field("http_max_connections", &json!("20")).is_ok());
+        assert!(validate_config_field("http_max_connections", &json!("0")).is_err());
+        assert!(validate_config_field("http_max_connections", &json!("1001")).is_err());
+        assert!(validate_config_field("http_max_connections", &json!(-1)).is_err());
+    }
+
+    #[test]
+    fn test_validate_http_max_retries_string() {
+        assert!(validate_config_field("http_max_retries", &json!("5")).is_ok());
+        assert!(validate_config_field("http_max_retries", &json!("11")).is_err());
+        assert!(validate_config_field("http_max_retries", &json!(-1)).is_err());
+    }
+
+    #[test]
+    fn test_validate_fake_reasoning_max_tokens_bounds() {
+        assert!(validate_config_field("fake_reasoning_max_tokens", &json!(1)).is_ok());
+        assert!(validate_config_field("fake_reasoning_max_tokens", &json!(1000000)).is_ok());
+        assert!(validate_config_field("fake_reasoning_max_tokens", &json!(0)).is_err());
+        assert!(validate_config_field("fake_reasoning_max_tokens", &json!(1000001)).is_err());
+    }
+
+    #[test]
+    fn test_validate_tool_description_max_length_bounds() {
+        assert!(validate_config_field("tool_description_max_length", &json!(1)).is_ok());
+        assert!(validate_config_field("tool_description_max_length", &json!(1000000)).is_ok());
+        assert!(validate_config_field("tool_description_max_length", &json!(0)).is_err());
+        assert!(validate_config_field("tool_description_max_length", &json!(1000001)).is_err());
+    }
+
+    #[test]
     fn test_field_descriptions_complete() {
         let descs = get_config_field_descriptions();
         let expected_keys = vec![
@@ -337,6 +497,12 @@ mod tests {
             "truncation_recovery",
             "tool_description_max_length",
             "first_token_timeout",
+            "streaming_timeout",
+            "token_refresh_threshold",
+            "http_max_connections",
+            "http_connect_timeout",
+            "http_request_timeout",
+            "http_max_retries",
             "tls_cert_path",
             "tls_key_path",
         ];

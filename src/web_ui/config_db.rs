@@ -197,16 +197,39 @@ impl ConfigDb {
     }
 
     /// Overlay persisted config values onto an existing Config struct.
+    ///
+    /// Numeric fields are validated against allowed ranges. Out-of-range or
+    /// unparseable values are logged and silently skipped (the default is kept).
     pub async fn load_into_config(&self, config: &mut Config) -> Result<()> {
+        /// Parse a numeric config value, validate it against an inclusive range,
+        /// and log warnings on parse failure or out-of-range values.
+        macro_rules! parse_ranged {
+            ($key:expr, $value:expr, $field:expr, $ty:ty, $lo:expr, $hi:expr) => {
+                match $value.parse::<$ty>() {
+                    Ok(v) if ($lo..=$hi).contains(&v) => $field = v,
+                    Ok(v) => {
+                        tracing::warn!(
+                            "Config '{}' value '{}' out of range ({}..={}), keeping default",
+                            $key, v, $lo, $hi
+                        );
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            "Failed to parse config '{}' value '{}', keeping default",
+                            $key, $value
+                        );
+                    }
+                }
+            };
+        }
+
         let all = self.get_all().await?;
 
         for (key, value) in &all {
             match key.as_str() {
                 "server_host" => config.server_host = value.clone(),
                 "server_port" => {
-                    if let Ok(v) = value.parse() {
-                        config.server_port = v;
-                    }
+                    parse_ranged!(key, value, config.server_port, u16, 1, 65535);
                 }
                 "proxy_api_key" => config.proxy_api_key = value.clone(),
                 "kiro_region" => config.kiro_region = value.clone(),
@@ -221,27 +244,49 @@ impl ConfigDb {
                 "fake_reasoning_enabled" => {
                     if let Ok(v) = value.parse() {
                         config.fake_reasoning_enabled = v;
+                    } else {
+                        tracing::warn!(
+                            "Failed to parse config '{}' value '{}', keeping default",
+                            key, value
+                        );
                     }
                 }
                 "fake_reasoning_max_tokens" => {
-                    if let Ok(v) = value.parse() {
-                        config.fake_reasoning_max_tokens = v;
-                    }
+                    parse_ranged!(key, value, config.fake_reasoning_max_tokens, u32, 1, 1_000_000);
                 }
                 "truncation_recovery" => {
                     if let Ok(v) = value.parse() {
                         config.truncation_recovery = v;
+                    } else {
+                        tracing::warn!(
+                            "Failed to parse config '{}' value '{}', keeping default",
+                            key, value
+                        );
                     }
                 }
                 "tool_description_max_length" => {
-                    if let Ok(v) = value.parse() {
-                        config.tool_description_max_length = v;
-                    }
+                    parse_ranged!(key, value, config.tool_description_max_length, usize, 1, 1_000_000);
                 }
                 "first_token_timeout" => {
-                    if let Ok(v) = value.parse() {
-                        config.first_token_timeout = v;
-                    }
+                    parse_ranged!(key, value, config.first_token_timeout, u64, 1, 86400);
+                }
+                "streaming_timeout" => {
+                    parse_ranged!(key, value, config.streaming_timeout, u64, 1, 86400);
+                }
+                "token_refresh_threshold" => {
+                    parse_ranged!(key, value, config.token_refresh_threshold, u64, 1, 86400);
+                }
+                "http_max_connections" => {
+                    parse_ranged!(key, value, config.http_max_connections, usize, 1, 1000);
+                }
+                "http_connect_timeout" => {
+                    parse_ranged!(key, value, config.http_connect_timeout, u64, 1, 86400);
+                }
+                "http_request_timeout" => {
+                    parse_ranged!(key, value, config.http_request_timeout, u64, 1, 86400);
+                }
+                "http_max_retries" => {
+                    parse_ranged!(key, value, config.http_max_retries, u32, 0, 10);
                 }
                 "tls_cert_path" => {
                     config.tls_cert_path = Some(std::path::PathBuf::from(value));
@@ -660,6 +705,130 @@ mod tests {
             db.get_refresh_token().await.unwrap(),
             Some("my-token".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_load_into_config_numeric_fields_valid() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("streaming_timeout", "120", "test").await.unwrap();
+        db.set("token_refresh_threshold", "600", "test").await.unwrap();
+        db.set("first_token_timeout", "30", "test").await.unwrap();
+        db.set("http_max_connections", "500", "test").await.unwrap();
+        db.set("http_connect_timeout", "10", "test").await.unwrap();
+        db.set("http_request_timeout", "60", "test").await.unwrap();
+        db.set("http_max_retries", "5", "test").await.unwrap();
+        db.set("fake_reasoning_max_tokens", "8192", "test").await.unwrap();
+        db.set("tool_description_max_length", "4096", "test").await.unwrap();
+
+        let mut config = create_test_config();
+        db.load_into_config(&mut config).await.unwrap();
+
+        assert_eq!(config.streaming_timeout, 120);
+        assert_eq!(config.token_refresh_threshold, 600);
+        assert_eq!(config.first_token_timeout, 30);
+        assert_eq!(config.http_max_connections, 500);
+        assert_eq!(config.http_connect_timeout, 10);
+        assert_eq!(config.http_request_timeout, 60);
+        assert_eq!(config.http_max_retries, 5);
+        assert_eq!(config.fake_reasoning_max_tokens, 8192);
+        assert_eq!(config.tool_description_max_length, 4096);
+    }
+
+    #[tokio::test]
+    async fn test_load_into_config_out_of_range_keeps_defaults() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        // All out-of-range: too high or zero
+        db.set("server_port", "0", "test").await.unwrap();
+        db.set("streaming_timeout", "0", "test").await.unwrap();
+        db.set("token_refresh_threshold", "100000", "test").await.unwrap();
+        db.set("first_token_timeout", "100000", "test").await.unwrap();
+        db.set("http_max_connections", "9999", "test").await.unwrap();
+        db.set("http_connect_timeout", "0", "test").await.unwrap();
+        db.set("http_request_timeout", "100000", "test").await.unwrap();
+        db.set("http_max_retries", "99", "test").await.unwrap();
+        db.set("fake_reasoning_max_tokens", "0", "test").await.unwrap();
+        db.set("tool_description_max_length", "0", "test").await.unwrap();
+
+        let mut config = create_test_config();
+        let defaults = create_test_config();
+        db.load_into_config(&mut config).await.unwrap();
+
+        // All should remain at defaults
+        assert_eq!(config.server_port, defaults.server_port);
+        assert_eq!(config.streaming_timeout, defaults.streaming_timeout);
+        assert_eq!(config.token_refresh_threshold, defaults.token_refresh_threshold);
+        assert_eq!(config.first_token_timeout, defaults.first_token_timeout);
+        assert_eq!(config.http_max_connections, defaults.http_max_connections);
+        assert_eq!(config.http_connect_timeout, defaults.http_connect_timeout);
+        assert_eq!(config.http_request_timeout, defaults.http_request_timeout);
+        assert_eq!(config.http_max_retries, defaults.http_max_retries);
+        assert_eq!(config.fake_reasoning_max_tokens, defaults.fake_reasoning_max_tokens);
+        assert_eq!(config.tool_description_max_length, defaults.tool_description_max_length);
+    }
+
+    #[tokio::test]
+    async fn test_load_into_config_unparseable_keeps_defaults() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("server_port", "not_a_number", "test").await.unwrap();
+        db.set("http_max_retries", "abc", "test").await.unwrap();
+        db.set("fake_reasoning_enabled", "not_bool", "test").await.unwrap();
+
+        let mut config = create_test_config();
+        let defaults = create_test_config();
+        db.load_into_config(&mut config).await.unwrap();
+
+        assert_eq!(config.server_port, defaults.server_port);
+        assert_eq!(config.http_max_retries, defaults.http_max_retries);
+        assert_eq!(config.fake_reasoning_enabled, defaults.fake_reasoning_enabled);
+    }
+
+    #[tokio::test]
+    async fn test_load_into_config_tls_paths() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        db.set("tls_cert_path", "/etc/ssl/cert.pem", "test").await.unwrap();
+        db.set("tls_key_path", "/etc/ssl/key.pem", "test").await.unwrap();
+
+        let mut config = create_test_config();
+        assert!(config.tls_cert_path.is_none());
+        assert!(config.tls_key_path.is_none());
+
+        db.load_into_config(&mut config).await.unwrap();
+
+        assert_eq!(config.tls_cert_path, Some(std::path::PathBuf::from("/etc/ssl/cert.pem")));
+        assert_eq!(config.tls_key_path, Some(std::path::PathBuf::from("/etc/ssl/key.pem")));
+    }
+
+    #[tokio::test]
+    async fn test_load_into_config_boundary_values() {
+        let Some(db) = setup_test_db().await else {
+            eprintln!("Skipping: DATABASE_URL not set");
+            return;
+        };
+        // Test exact boundary values (min and max)
+        db.set("server_port", "1", "test").await.unwrap();
+        db.set("http_max_retries", "0", "test").await.unwrap();
+        db.set("http_max_connections", "1000", "test").await.unwrap();
+        db.set("fake_reasoning_max_tokens", "1000000", "test").await.unwrap();
+
+        let mut config = create_test_config();
+        db.load_into_config(&mut config).await.unwrap();
+
+        assert_eq!(config.server_port, 1);
+        assert_eq!(config.http_max_retries, 0);
+        assert_eq!(config.http_max_connections, 1000);
+        assert_eq!(config.fake_reasoning_max_tokens, 1_000_000);
     }
 
     #[tokio::test]

@@ -16,22 +16,6 @@ pub struct CliArgs {
     #[arg(short, long, env = "SERVER_PORT", default_value = "8000")]
     pub port: u16,
 
-    /// Proxy API key for client authentication
-    #[arg(long, env = "PROXY_API_KEY")]
-    pub proxy_api_key: Option<String>,
-
-    /// AWS region for Kiro API
-    #[arg(long, env = "KIRO_REGION", default_value = "us-east-1")]
-    pub kiro_region: String,
-
-    /// Log level
-    #[arg(long, env = "LOG_LEVEL", default_value = "info")]
-    pub log_level: String,
-
-    /// Debug mode (off, errors, all)
-    #[arg(long, env = "DEBUG_MODE", default_value = "off")]
-    pub debug_mode: String,
-
     /// PostgreSQL database URL for config persistence
     #[arg(long, env = "DATABASE_URL")]
     pub database_url: Option<String>,
@@ -51,7 +35,6 @@ pub struct CliArgs {
     /// Enable monitoring dashboard TUI
     #[arg(long, default_value = "false")]
     pub dashboard: bool,
-
 }
 
 #[derive(Clone, Debug)]
@@ -164,24 +147,29 @@ impl Config {
         // Load .env file if it exists
         dotenvy::dotenv().ok();
 
+        // Warn about deprecated env vars that are now managed via Web UI
+        for (var, name) in [
+            ("PROXY_API_KEY", "proxy API key"),
+            ("KIRO_REGION", "Kiro region"),
+            ("LOG_LEVEL", "log level"),
+            ("DEBUG_MODE", "debug mode"),
+        ] {
+            if std::env::var(var).is_ok() {
+                tracing::warn!(
+                    "{} env var is set but no longer read at startup. Configure {} via the Web UI at /_ui/ instead.",
+                    var, name
+                );
+            }
+        }
+
         // Parse CLI arguments (bootstrap-only subset)
         let args = CliArgs::parse();
 
         let mut config = Self::with_defaults();
 
-        // Apply CLI / env overrides
+        // Apply bootstrap CLI / env overrides
         config.server_host = args.host;
         config.server_port = args.port;
-        if let Some(key) = args.proxy_api_key {
-            config.proxy_api_key = key;
-        }
-        config.kiro_region = args.kiro_region;
-        config.log_level = args.log_level;
-        config.debug_mode = match args.debug_mode.to_lowercase().as_str() {
-            "errors" => DebugMode::Errors,
-            "all" => DebugMode::All,
-            _ => DebugMode::Off,
-        };
         config.dashboard = args.dashboard;
         config.web_ui_enabled = args.web_ui;
         config.tls_cert_path = args.tls_cert.map(|s| expand_tilde(&s));
