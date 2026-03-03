@@ -113,8 +113,8 @@
 // Feature Cards
 // ============================================================
 .features {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
   gap: 1rem;
   margin: 2rem 0;
 }
@@ -149,15 +149,24 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px;
+  min-height: 28px;
+  max-width: 28px;
+  max-height: 28px;
   border-radius: 6px;
   flex-shrink: 0;
+  overflow: hidden;
 }
 
-.feature-card h3 .fc-icon svg {
-  width: 16px;
-  height: 16px;
+.feature-card h3 .fc-icon svg,
+.feature-card .fc-icon svg {
+  width: 16px !important;
+  height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  flex-shrink: 0;
 }
 
 .feature-card p {
