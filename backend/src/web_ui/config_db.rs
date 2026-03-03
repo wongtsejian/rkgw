@@ -112,6 +112,17 @@ impl ConfigDb {
             self.migrate_to_v4().await?;
         }
 
+        // Re-read max version after v4 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 5 {
+            self.migrate_to_v5().await?;
+        }
+
         Ok(())
     }
 
@@ -269,6 +280,41 @@ impl ConfigDb {
             .context("Failed to record schema version 4")?;
 
         tracing::info!("Database migration to version 4 complete");
+        Ok(())
+    }
+
+    /// Version 5 migration: MCP clients table.
+    async fn migrate_to_v5(&self) -> Result<()> {
+        tracing::info!("Running database migration to version 5 (MCP clients)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS mcp_clients (
+                id                      UUID PRIMARY KEY,
+                name                    TEXT UNIQUE NOT NULL,
+                connection_type         TEXT NOT NULL CHECK (connection_type IN ('http', 'sse', 'stdio')),
+                connection_string       TEXT,
+                stdio_config            JSONB,
+                auth_type               TEXT NOT NULL DEFAULT 'none' CHECK (auth_type IN ('none', 'headers')),
+                headers_encrypted       TEXT,
+                tools_to_execute        JSONB NOT NULL DEFAULT '[\"*\"]'::jsonb,
+                is_ping_available       BOOLEAN NOT NULL DEFAULT TRUE,
+                tool_sync_interval_secs INTEGER NOT NULL DEFAULT 0,
+                enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )",
+        )
+        .execute(&self.pool)
+        .await
+        .context("Failed to create mcp_clients table")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(5_i32)
+            .execute(&self.pool)
+            .await
+            .context("Failed to record schema version 5")?;
+
+        tracing::info!("Database migration to version 5 complete");
         Ok(())
     }
 
@@ -503,6 +549,29 @@ impl ConfigDb {
                 }
                 "http_max_retries" => {
                     parse_ranged!(key, value, config.http_max_retries, u32, 0, 10);
+                }
+                "mcp_enabled" => {
+                    if let Ok(v) = value.parse() {
+                        config.mcp_enabled = v;
+                    } else {
+                        tracing::warn!(
+                            "Failed to parse config '{}' value '{}', keeping default",
+                            key,
+                            value
+                        );
+                    }
+                }
+                "mcp_tool_execution_timeout" => {
+                    parse_ranged!(key, value, config.mcp_tool_execution_timeout, u64, 1, 86400);
+                }
+                "mcp_health_check_interval" => {
+                    parse_ranged!(key, value, config.mcp_health_check_interval, u64, 1, 86400);
+                }
+                "mcp_tool_sync_interval" => {
+                    parse_ranged!(key, value, config.mcp_tool_sync_interval, u64, 0, 86400);
+                }
+                "mcp_max_consecutive_failures" => {
+                    parse_ranged!(key, value, config.mcp_max_consecutive_failures, u32, 1, 100);
                 }
                 _ => {}
             }

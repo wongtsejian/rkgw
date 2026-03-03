@@ -90,6 +90,7 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .route("/config", put(routes::update_config))
         .merge(config_api::domain_routes())
         .merge(crate::guardrails::api::guardrails_routes())
+        .nest("/admin/mcp", crate::mcp::api::mcp_admin_routes())
         .layer(axum::middleware::from_fn(google_auth::admin_middleware))
         .layer(axum::middleware::from_fn(google_auth::csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(

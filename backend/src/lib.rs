@@ -5,6 +5,7 @@ pub mod converters;
 pub mod error;
 pub mod guardrails;
 pub mod http_client;
+pub mod mcp;
 pub mod log_capture;
 pub mod metrics;
 pub mod middleware;

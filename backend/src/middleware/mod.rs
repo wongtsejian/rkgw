@@ -285,6 +285,7 @@ mod tests {
             kiro_token_cache: Arc::new(dashmap::DashMap::new()),
             oauth_pending: Arc::new(dashmap::DashMap::new()),
             guardrails_engine: None,
+            mcp_manager: None,
         }
     }
 

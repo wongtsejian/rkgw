@@ -10,6 +10,7 @@ mod converters;
 mod error;
 mod guardrails;
 mod http_client;
+mod mcp;
 mod log_capture;
 mod metrics;
 mod middleware;
@@ -184,6 +185,7 @@ async fn main() -> Result<()> {
         kiro_token_cache: Arc::new(dashmap::DashMap::new()),
         oauth_pending: Arc::new(dashmap::DashMap::new()),
         guardrails_engine: None,
+        mcp_manager: None,
     };
 
     // Initialize guardrails engine if DB is available
@@ -202,6 +204,20 @@ async fn main() -> Result<()> {
             Err(e) => {
                 tracing::warn!("Failed to initialize guardrails engine: {}", e);
             }
+        }
+    }
+
+    // Initialize MCP Gateway manager if enabled and DB is available
+    if config.mcp_enabled {
+        if let Some(ref db) = app_state.config_db {
+            let mcp_db = mcp::db::McpDb::new(db.pool().clone());
+            let mgr = mcp::McpManager::new(
+                Arc::new(mcp_db),
+                config.mcp_tool_execution_timeout,
+            );
+            mgr.initialize().await;
+            app_state.mcp_manager = Some(Arc::new(mgr));
+            tracing::info!("MCP Gateway initialized");
         }
     }
 
@@ -393,11 +409,45 @@ fn build_app(state: routes::AppState) -> axum::Router {
 
     let web_ui = web_ui::web_ui_routes(state.clone());
 
-    Router::new()
+    let mut router = Router::new()
         .merge(health_routes)
         .merge(openai_routes)
         .merge(anthropic_routes)
-        .merge(web_ui)
+        .merge(web_ui);
+
+    // Register MCP routes if manager is available
+    if state.mcp_manager.is_some() {
+        use axum::routing::post;
+
+        // /v1/mcp/tool/execute — authenticated tool execution
+        let mcp_tool_routes = Router::new()
+            .route("/v1/mcp/tool/execute", post(mcp::api::execute_tool_handler))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                middleware::auth_middleware,
+            ))
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                crate::web_ui::setup_guard,
+            ))
+            .with_state(state.clone());
+
+        // /mcp — MCP server endpoint (JSON-RPC POST + SSE GET)
+        let mcp_server_routes = Router::new()
+            .route(
+                "/mcp",
+                post(mcp::server::mcp_post_handler).get(mcp::server::mcp_sse_handler),
+            )
+            .layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                middleware::auth_middleware,
+            ))
+            .with_state(state.clone());
+
+        router = router.merge(mcp_tool_routes).merge(mcp_server_routes);
+    }
+
+    router
         .layer(middleware::cors_layer())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

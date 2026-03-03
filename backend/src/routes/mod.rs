@@ -97,6 +97,9 @@ pub struct AppState {
     /// Guardrails engine for input/output validation (None when guardrails disabled or no DB)
     #[allow(dead_code)]
     pub guardrails_engine: Option<Arc<crate::guardrails::engine::GuardrailsEngine>>,
+    /// MCP Gateway manager (None when mcp_enabled=false or feature not yet initialized)
+    #[allow(dead_code)]
+    pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
 }
 
 impl AppState {
@@ -174,6 +177,12 @@ fn error_type_from_api_error(err: &ApiError) -> &'static str {
         ApiError::LastAdmin => "validation",
         ApiError::GuardrailBlocked { .. } => "guardrail",
         ApiError::GuardrailWarning { .. } => "guardrail",
+        ApiError::McpConnectionError(_) => "mcp",
+        ApiError::McpToolNotFound(_) => "mcp",
+        ApiError::McpToolExecutionError(_) => "mcp",
+        ApiError::McpClientNotFound(_) => "mcp",
+        ApiError::McpProtocolError(_) => "mcp",
+        ApiError::NotFound(_) => "not_found",
     }
 }
 
@@ -359,6 +368,9 @@ async fn chat_completions_handler(
     // Extract per-user Kiro credentials injected by auth middleware
     let user_creds = raw_request.extensions().get::<UserKiroCreds>().cloned();
 
+    // Extract headers before consuming the request body (needed for MCP tool filtering)
+    let headers = raw_request.headers().clone();
+
     // Parse JSON body
     let body_bytes = axum::body::to_bytes(raw_request.into_body(), 10 * 1024 * 1024)
         .await
@@ -424,6 +436,23 @@ async fn chat_completions_handler(
             .into_iter()
             .filter_map(|v| serde_json::from_value(v).ok())
             .collect();
+    }
+
+    // Inject MCP tools into request
+    if config.mcp_enabled {
+        if let Some(ref mcp) = state.mcp_manager {
+            let mcp_tools = mcp.get_available_tools(&headers).await;
+            if !mcp_tools.is_empty() {
+                let mut tools = request.tools.unwrap_or_default();
+                // Convert MCP tool values into the OpenAI tool format
+                for tool_val in mcp_tools {
+                    if let Ok(tool) = serde_json::from_value(tool_val) {
+                        tools.push(tool);
+                    }
+                }
+                request.tools = Some(tools);
+            }
+        }
     }
 
     // INPUT GUARDRAIL CHECK
@@ -762,6 +791,22 @@ async fn anthropic_messages_handler(
             .collect();
     }
 
+    // Inject MCP tools into request
+    if config.mcp_enabled {
+        if let Some(ref mcp) = state.mcp_manager {
+            let mcp_tools = mcp.get_available_tools(&headers).await;
+            if !mcp_tools.is_empty() {
+                let mut tools = request.tools.unwrap_or_default();
+                for tool_val in mcp_tools {
+                    if let Ok(tool) = serde_json::from_value(tool_val) {
+                        tools.push(tool);
+                    }
+                }
+                request.tools = Some(tools);
+            }
+        }
+    }
+
     // INPUT GUARDRAIL CHECK
     if config.guardrails_enabled {
         if let Some(ref engine) = state.guardrails_engine {
@@ -1030,6 +1075,7 @@ mod tests {
             kiro_token_cache: Arc::new(DashMap::new()),
             oauth_pending: Arc::new(DashMap::new()),
             guardrails_engine: None,
+            mcp_manager: None,
         }
     }
 

@@ -1628,3 +1628,122 @@ select.config-input {
 @media (max-width: 900px) {
   .guardrails-form-grid { grid-template-columns: 1fr; }
 }
+
+/* ---- MCP Clients ---- */
+
+.mcp-type-badge {
+  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--blue-dim);
+  color: var(--blue);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.mcp-status {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.mcp-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mcp-status-connected { color: var(--green); }
+.mcp-status-connected::before {
+  background: var(--green);
+  box-shadow: 0 0 6px rgba(74, 222, 128, 0.5);
+}
+
+.mcp-status-connecting { color: var(--yellow); }
+.mcp-status-connecting::before {
+  background: var(--yellow);
+  animation: statusPulse 1.5s ease-in-out infinite;
+}
+
+.mcp-status-disconnected { color: var(--text-tertiary); }
+.mcp-status-disconnected::before { background: var(--text-tertiary); }
+
+.mcp-status-error { color: var(--red); }
+.mcp-status-error::before {
+  background: var(--red);
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
+.mcp-detail-panel {
+  margin-top: 16px;
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--green-dim);
+  border-radius: var(--radius);
+}
+
+.mcp-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.mcp-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mcp-detail-label {
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-tertiary);
+}
+
+.mcp-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mcp-tool-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 10px;
+  background: var(--surface);
+  border-left: 2px solid var(--green-dim);
+  transition: background 0.1s;
+}
+
+.mcp-tool-item:hover { background: var(--surface-hover); }
+
+.mcp-tool-name {
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  color: var(--green);
+}
+
+.mcp-tool-desc {
+  font-size: 0.65rem;
+  font-family: var(--font-mono);
+  color: var(--text-tertiary);
+}
+
+@media (max-width: 900px) {
+  .mcp-detail-grid { grid-template-columns: 1fr; }
+}

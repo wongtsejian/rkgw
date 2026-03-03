@@ -1873,6 +1873,7 @@ version = "1.0.8"
 dependencies = [
  "anyhow",
  "async-stream",
+ "async-trait",
  "aws-credential-types",
  "aws-sigv4",
  "axum 0.7.9",
@@ -1910,6 +1911,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-test",
+ "tokio-util",
  "tower 0.4.13",
  "tower-http 0.5.2",
  "tracing",
