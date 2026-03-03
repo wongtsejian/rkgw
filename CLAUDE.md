@@ -7,11 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 cargo build                        # Debug build
 cargo build --release              # Release build
-cargo run --bin kiro-gateway --release  # Run the gateway
 cargo clippy                       # Lint (fix all warnings before committing)
 cargo fmt                          # Format code
 cargo fmt -- --check               # Check formatting only
 ```
+
+The gateway runs exclusively via docker-compose. There is no standalone CLI binary.
 
 ## Testing
 
@@ -27,7 +28,11 @@ cargo test --features test-utils    # Integration tests
 
 Set in `.env` or export (bootstrap-only — all runtime config is managed via the Web UI):
 - `DATABASE_URL` - PostgreSQL connection string (e.g. `postgres://user:pass@localhost:5432/kiro_gateway`)
-- `SERVER_HOST` / `SERVER_PORT` - Bind address and port (defaults: `127.0.0.1:8000`)
+- `SERVER_HOST` / `SERVER_PORT` - Bind address and port (defaults: `0.0.0.0:8000`)
+- `GOOGLE_CLIENT_ID` - Google OAuth Client ID (required)
+- `GOOGLE_CLIENT_SECRET` - Google OAuth Client Secret (required)
+- `GOOGLE_CALLBACK_URL` - Google OAuth callback URL (required)
+- `TLS_CERT` / `TLS_KEY` - Custom TLS cert/key paths (optional; self-signed generated if omitted)
 
 ## Architecture
 
@@ -51,14 +56,14 @@ Client (OpenAI or Anthropic format)
 ### Shared State (AppState)
 
 Defined in `routes/mod.rs`. All handlers receive this via Axum's state extraction:
-- `config: Config` - loaded from CLI args + env vars
+- `config: Arc<RwLock<Config>>` - loaded from env vars + DB overlay
 - `auth_manager: Arc<AuthManager>` - token management with auto-refresh
 - `http_client: Arc<KiroHttpClient>` - connection-pooled HTTP client
 - `model_cache: Arc<RwLock<ModelCache>>` - cached model list from Kiro API
 - `model_resolver: Arc<ModelResolver>` - normalizes model name aliases
 - `metrics: Arc<MetricsCollector>` - request latency/token tracking
-- `log_buffer: Arc<RwLock<Vec<LogEntry>>>` - recent logs for dashboard
-- `config_db: Option<Arc<ConfigDb>>` - PostgreSQL config persistence (when web UI enabled)
+- `log_buffer: Arc<Mutex<VecDeque<LogEntry>>>` - recent logs for web UI SSE streaming
+- `config_db: Option<Arc<ConfigDb>>` - PostgreSQL config persistence
 
 ### Key Modules
 
@@ -67,7 +72,7 @@ Defined in `routes/mod.rs`. All handlers receive this via Axum's state extractio
 - `streaming/mod.rs` - Parses Kiro's AWS Event Stream binary format into `KiroEvent` variants, then formats as SSE.
 - `models/` - Request/response types for OpenAI (`openai.rs`), Anthropic (`anthropic.rs`), and Kiro (`kiro.rs`) formats.
 - `truncation.rs` - Detects truncated API responses and triggers recovery retries.
-- `dashboard/` - Optional TUI (ratatui) for real-time monitoring. Enabled with `--dashboard` flag.
+- `log_capture.rs` - Log entry struct + tracing capture layer for web UI SSE log streaming.
 - `web_ui/` - Web dashboard served at `/_ui/`. Has its own routes, templates, and PostgreSQL config persistence.
 - `resolver.rs` - Maps model name aliases to canonical Kiro model IDs. Don't hardcode model IDs.
 
@@ -77,7 +82,7 @@ Defined in `routes/mod.rs`. All handlers receive this via Axum's state extractio
 - `POST /v1/messages` - Anthropic-compatible messages
 - `GET /v1/models` - List available models
 - `GET /health` - Health check
-- `/_ui` - Web dashboard (when enabled)
+- `/_ui` - Web dashboard
 
 ## Code Style
 

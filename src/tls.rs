@@ -42,13 +42,13 @@ impl TlsConfig {
             (Some(_), None) => {
                 anyhow::bail!(
                     "TLS certificate path provided without a key path. \
-                     Please also set --tls-key."
+                     Please also set TLS_KEY."
                 );
             }
             (None, Some(_)) => {
                 anyhow::bail!(
                     "TLS key path provided without a certificate path. \
-                     Please also set --tls-cert."
+                     Please also set TLS_CERT."
                 );
             }
             (None, None) => load_or_generate_self_signed().await,
@@ -119,7 +119,7 @@ async fn load_or_generate_self_signed() -> Result<RustlsConfig> {
     tracing::info!("✅ Self-signed certificate saved to: {}", tls_dir.display());
     tracing::warn!(
         "⚠️  Self-signed certificates are not trusted by browsers/clients. \
-         Use --tls-cert and --tls-key to provide your own certificate for production use."
+         Use TLS_CERT and TLS_KEY to provide your own certificate for production use."
     );
 
     RustlsConfig::from_pem(cert_pem.into(), key_pem.into())
@@ -357,7 +357,7 @@ fn is_self_signed_cert_expired(cert_path: &Path) -> bool {
 fn default_tls_dir() -> Result<PathBuf> {
     let home = dirs::home_dir().context(
         "Could not determine home directory. \
-         Please provide --tls-cert and --tls-key explicitly.",
+         Please provide TLS_CERT and TLS_KEY explicitly.",
     )?;
     Ok(home.join(".kiro-gateway").join(TLS_DIR_NAME))
 }
