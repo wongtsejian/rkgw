@@ -6,14 +6,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```
 rkgw/
-├── backend/           # Rust API server (Axum 0.7 + Tokio)
-├── frontend/          # React 19 SPA (Vite 7 + TypeScript 5.9), served by nginx
-├── docker-compose.yml # 4 services: db, backend, frontend (nginx), certbot
-├── init-certs.sh      # First-time Let's Encrypt cert provisioning
+├── backend/                    # Rust API server (Axum 0.7 + Tokio)
+├── frontend/                   # React 19 SPA (Vite 7 + TypeScript 5.9), served by nginx
+├── docker-compose.yml          # 4 services: db, backend, frontend (nginx), certbot
+├── docker-compose.gateway.yml  # Proxy-only: single backend container, no DB/SSO
+├── init-certs.sh               # First-time Let's Encrypt cert provisioning
 └── .env.example
 ```
 
-Runs exclusively via docker-compose. No standalone CLI binary.
+Runs via docker-compose. Two modes: full deployment (`docker-compose.yml`) or proxy-only (`docker-compose.gateway.yml`).
 
 ## Build & Dev Commands
 
