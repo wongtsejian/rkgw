@@ -970,34 +970,41 @@ pub fn merge_adjacent_messages(messages: Vec<UnifiedMessage>) -> Vec<UnifiedMess
 
 /// Builds history array for Kiro API from unified messages.
 ///
-/// Kiro API expects history as paired turns: each entry must have both
-/// `userInputMessage` and `assistantResponseMessage`. This function pairs
-/// adjacent user/assistant messages into proper turn objects.
+/// Kiro API expects history as a flat array of ChatMessage tagged unions.
+/// Each entry is EITHER `{"userInputMessage": {...}}` OR `{"assistantResponseMessage": {...}}`.
+/// They alternate user/assistant but are NOT paired into single objects.
 ///
 /// Edge cases:
-/// - Leading assistant message (no preceding user): prepend synthetic user message
-/// - Unpaired trailing user message: dropped (it becomes the current message upstream)
+/// - Leading assistant message (no preceding user): prepend synthetic user entry
 /// - Consecutive same-role messages: should already be merged by merge_adjacent_messages
 pub fn build_kiro_history(messages: &[UnifiedMessage], model_id: &str) -> Vec<Value> {
-    // First, build individual entries as before
-    let mut entries: Vec<(String, Value)> = Vec::new(); // (role, json_value)
+    let mut history: Vec<Value> = Vec::new();
 
     for msg in messages {
         match msg.role.as_str() {
             "user" => {
                 let user_input = build_kiro_user_input(msg, model_id);
-                entries.push(("user".to_string(), user_input));
+                history.push(json!({"userInputMessage": user_input}));
             }
             "assistant" => {
+                // If no preceding user entry, insert synthetic user first
+                let last_is_user = history.last().map_or(false, |h| h.get("userInputMessage").is_some());
+                if !last_is_user {
+                    debug!("History: orphaned assistant message, adding synthetic user input");
+                    history.push(json!({"userInputMessage": synthetic_user_input(model_id)}));
+                }
                 let assistant_response = build_kiro_assistant_response(msg);
-                entries.push(("assistant".to_string(), assistant_response));
+                history.push(json!({"assistantResponseMessage": assistant_response}));
             }
             _ => {}
         }
     }
 
-    // Now pair them into turns
-    pair_history_entries(entries, model_id)
+    if !history.is_empty() {
+        debug!("Built {} history entries from {} messages", history.len(), messages.len());
+    }
+
+    history
 }
 
 /// Builds a Kiro userInputMessage JSON value from a unified message.
@@ -1085,63 +1092,6 @@ pub fn synthetic_user_input(model_id: &str) -> Value {
     })
 }
 
-/// Creates a synthetic assistant response for pairing with trailing user messages.
-fn synthetic_assistant_response() -> Value {
-    json!({"content": "(continued)"})
-}
-
-/// Pairs history entries into Kiro Turn objects.
-///
-/// Each turn must have both userInputMessage and assistantResponseMessage.
-/// Handles mismatches by inserting synthetic messages where needed.
-fn pair_history_entries(entries: Vec<(String, Value)>, model_id: &str) -> Vec<Value> {
-    let mut history = Vec::new();
-    let mut i = 0;
-
-    while i < entries.len() {
-        let (role, value) = &entries[i];
-
-        match role.as_str() {
-            "user" => {
-                // Check if next entry is assistant
-                if i + 1 < entries.len() && entries[i + 1].0 == "assistant" {
-                    // Perfect pair
-                    history.push(json!({
-                        "userInputMessage": value,
-                        "assistantResponseMessage": entries[i + 1].1
-                    }));
-                    i += 2;
-                } else {
-                    // Trailing user without assistant — pair with synthetic assistant
-                    debug!("History: trailing user message without assistant, adding synthetic assistant response");
-                    history.push(json!({
-                        "userInputMessage": value,
-                        "assistantResponseMessage": synthetic_assistant_response()
-                    }));
-                    i += 1;
-                }
-            }
-            "assistant" => {
-                // Leading/orphaned assistant without preceding user
-                debug!("History: orphaned assistant message without preceding user, adding synthetic user input");
-                history.push(json!({
-                    "userInputMessage": synthetic_user_input(model_id),
-                    "assistantResponseMessage": value
-                }));
-                i += 1;
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-
-    if !history.is_empty() {
-        debug!("Built {} history turn(s) from {} entries", history.len(), entries.len());
-    }
-
-    history
-}
 
 #[cfg(test)]
 mod tests {
@@ -1731,7 +1681,7 @@ mod tests {
     }
 
     // ==================================================================================================
-    // build_kiro_history / pair_history_entries tests
+    // build_kiro_history tests (flat alternating entries)
     // ==================================================================================================
 
     fn make_user_msg(text: &str) -> UnifiedMessage {
@@ -1755,17 +1705,18 @@ mod tests {
     }
 
     #[test]
-    fn test_build_kiro_history_normal_pairing() {
+    fn test_build_kiro_history_normal_alternating() {
         let messages = vec![
             make_user_msg("Hello"),
             make_assistant_msg("Hi there"),
         ];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        assert_eq!(history.len(), 1);
+        // Flat: 2 separate entries
+        assert_eq!(history.len(), 2);
         assert!(history[0]["userInputMessage"].is_object());
-        assert!(history[0]["assistantResponseMessage"].is_object());
         assert_eq!(history[0]["userInputMessage"]["content"], "Hello");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "Hi there");
+        assert!(history[1]["assistantResponseMessage"].is_object());
+        assert_eq!(history[1]["assistantResponseMessage"]["content"], "Hi there");
     }
 
     #[test]
@@ -1777,45 +1728,45 @@ mod tests {
             make_assistant_msg("A2"),
         ];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        assert_eq!(history.len(), 2);
+        // Flat: 4 separate entries
+        assert_eq!(history.len(), 4);
         assert_eq!(history[0]["userInputMessage"]["content"], "Q1");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "A1");
-        assert_eq!(history[1]["userInputMessage"]["content"], "Q2");
-        assert_eq!(history[1]["assistantResponseMessage"]["content"], "A2");
+        assert_eq!(history[1]["assistantResponseMessage"]["content"], "A1");
+        assert_eq!(history[2]["userInputMessage"]["content"], "Q2");
+        assert_eq!(history[3]["assistantResponseMessage"]["content"], "A2");
     }
 
     #[test]
     fn test_build_kiro_history_leading_assistant() {
-        // This is the exact bug scenario: history starts with assistant message
+        // History starts with assistant message — synthetic user prepended
         let messages = vec![
             make_assistant_msg("Session started"),
             make_user_msg("Hi"),
             make_assistant_msg("Hello"),
         ];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        assert_eq!(history.len(), 2);
-        // First turn: synthetic user + orphaned assistant
+        // Flat: synthetic user + assistant + user + assistant = 4 entries
+        assert_eq!(history.len(), 4);
         assert_eq!(history[0]["userInputMessage"]["content"], "(continued)");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "Session started");
-        // Second turn: normal pair
-        assert_eq!(history[1]["userInputMessage"]["content"], "Hi");
-        assert_eq!(history[1]["assistantResponseMessage"]["content"], "Hello");
+        assert_eq!(history[1]["assistantResponseMessage"]["content"], "Session started");
+        assert_eq!(history[2]["userInputMessage"]["content"], "Hi");
+        assert_eq!(history[3]["assistantResponseMessage"]["content"], "Hello");
     }
 
     #[test]
     fn test_build_kiro_history_trailing_user() {
-        // Trailing user message without assistant gets synthetic assistant
+        // Trailing user message is just emitted as-is
         let messages = vec![
             make_user_msg("Hello"),
             make_assistant_msg("Hi"),
             make_user_msg("Follow up"),
         ];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        assert_eq!(history.len(), 2);
+        // Flat: 3 entries
+        assert_eq!(history.len(), 3);
         assert_eq!(history[0]["userInputMessage"]["content"], "Hello");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "Hi");
-        assert_eq!(history[1]["userInputMessage"]["content"], "Follow up");
-        assert_eq!(history[1]["assistantResponseMessage"]["content"], "(continued)");
+        assert_eq!(history[1]["assistantResponseMessage"]["content"], "Hi");
+        assert_eq!(history[2]["userInputMessage"]["content"], "Follow up");
     }
 
     #[test]
@@ -1831,21 +1782,21 @@ mod tests {
         let history = build_kiro_history(&messages, "claude-sonnet-4");
         assert_eq!(history.len(), 1);
         assert_eq!(history[0]["userInputMessage"]["content"], "Hello");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "(continued)");
     }
 
     #[test]
     fn test_build_kiro_history_single_assistant() {
+        // Orphaned assistant gets synthetic user prepended
         let messages = vec![make_assistant_msg("I'm here")];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        assert_eq!(history.len(), 1);
+        assert_eq!(history.len(), 2);
         assert_eq!(history[0]["userInputMessage"]["content"], "(continued)");
-        assert_eq!(history[0]["assistantResponseMessage"]["content"], "I'm here");
+        assert_eq!(history[1]["assistantResponseMessage"]["content"], "I'm here");
     }
 
     #[test]
-    fn test_build_kiro_history_all_turns_have_both_fields() {
-        // Ensure every turn always has both required fields regardless of input
+    fn test_build_kiro_history_entries_are_tagged_unions() {
+        // Each entry is EITHER userInputMessage OR assistantResponseMessage, never both
         let messages = vec![
             make_assistant_msg("orphan"),
             make_user_msg("Q1"),
@@ -1853,15 +1804,12 @@ mod tests {
             make_user_msg("trailing"),
         ];
         let history = build_kiro_history(&messages, "claude-sonnet-4");
-        for (i, turn) in history.iter().enumerate() {
+        for (i, entry) in history.iter().enumerate() {
+            let has_user = entry.get("userInputMessage").is_some();
+            let has_assistant = entry.get("assistantResponseMessage").is_some();
             assert!(
-                turn["userInputMessage"].is_object(),
-                "Turn {} missing userInputMessage",
-                i
-            );
-            assert!(
-                turn["assistantResponseMessage"].is_object(),
-                "Turn {} missing assistantResponseMessage",
+                has_user ^ has_assistant,
+                "Entry {} should have exactly one of userInputMessage or assistantResponseMessage",
                 i
             );
         }

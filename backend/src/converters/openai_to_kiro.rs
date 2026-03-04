@@ -454,9 +454,9 @@ pub fn build_kiro_payload_core(
     // If current message is assistant, add it to history and create "Continue" message
     let mut final_history = history;
     if current_message.role == "assistant" {
-        // Must be a proper paired turn for Kiro API
+        // Flat entries: synthetic user, then assistant response
+        final_history.push(json!({"userInputMessage": synthetic_user_input(model_id)}));
         final_history.push(json!({
-            "userInputMessage": synthetic_user_input(model_id),
             "assistantResponseMessage": {
                 "content": current_content
             }
