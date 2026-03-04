@@ -18,7 +18,7 @@ use crate::cache::ModelCache;
 use crate::config::Config;
 use crate::converters::anthropic_to_kiro::build_kiro_payload as build_kiro_payload_anthropic;
 use crate::converters::openai_to_kiro::build_kiro_payload;
-use crate::error::ApiError;
+use crate::error::{ApiError, AnthropicApiError};
 use crate::http_client::KiroHttpClient;
 use crate::metrics::MetricsCollector;
 use crate::middleware;
@@ -92,7 +92,7 @@ fn error_type_from_api_error(err: &ApiError) -> &'static str {
         ApiError::Internal(_) => "internal",
         ApiError::InvalidModel(_) => "validation",
         ApiError::ConfigError(_) => "config",
-        ApiError::ContextLengthExceeded(_) => "context_length_exceeded",
+        ApiError::ContextLengthExceeded { .. } => "context_length_exceeded",
     }
 }
 
@@ -397,6 +397,16 @@ async fn anthropic_messages_handler(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     Json(request): Json<AnthropicMessagesRequest>,
+) -> Result<Response, AnthropicApiError> {
+    anthropic_messages_inner(state, headers, request)
+        .await
+        .map_err(AnthropicApiError)
+}
+
+async fn anthropic_messages_inner(
+    state: AppState,
+    headers: axum::http::HeaderMap,
+    request: AnthropicMessagesRequest,
 ) -> Result<Response, ApiError> {
     tracing::info!(
         "Request to /v1/messages: model={}, stream={}, messages={}",
@@ -749,7 +759,7 @@ mod tests {
         // The request should proceed past header validation
         // It will fail on the actual API call, but that's expected in tests
         match result {
-            Err(ApiError::ValidationError(msg)) => {
+            Err(AnthropicApiError(ApiError::ValidationError(msg))) => {
                 // Should NOT be about anthropic-version
                 assert!(
                     !msg.contains("anthropic-version"),
@@ -792,7 +802,7 @@ mod tests {
 
         assert!(result.is_err());
         match result {
-            Err(ApiError::ValidationError(msg)) => {
+            Err(AnthropicApiError(ApiError::ValidationError(msg))) => {
                 assert!(msg.contains("messages"));
             }
             _ => panic!("Expected ValidationError for empty messages"),
