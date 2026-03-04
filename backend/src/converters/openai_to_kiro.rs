@@ -16,8 +16,9 @@ use super::core::{
     convert_tools_to_kiro_format, ensure_assistant_before_tool_results,
     extract_images_from_content, extract_text_content, extract_tool_results_from_content,
     get_thinking_system_prompt_addition, inject_thinking_tags, merge_adjacent_messages,
-    process_tools_with_long_descriptions, strip_all_tool_content, ContentBlock, KiroPayloadResult,
-    MessageContent, ToolCall, ToolFunction, ToolResult, UnifiedMessage, UnifiedTool,
+    process_tools_with_long_descriptions, strip_all_tool_content, synthetic_user_input,
+    ContentBlock, KiroPayloadResult, MessageContent, ToolCall, ToolFunction, ToolResult,
+    UnifiedMessage, UnifiedTool,
 };
 
 // ==================================================================================================
@@ -453,7 +454,9 @@ pub fn build_kiro_payload_core(
     // If current message is assistant, add it to history and create "Continue" message
     let mut final_history = history;
     if current_message.role == "assistant" {
+        // Must be a proper paired turn for Kiro API
         final_history.push(json!({
+            "userInputMessage": synthetic_user_input(model_id),
             "assistantResponseMessage": {
                 "content": current_content
             }
