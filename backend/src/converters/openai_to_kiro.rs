@@ -565,39 +565,8 @@ mod tests {
 
     fn create_test_config() -> Config {
         Config {
-            server_host: "0.0.0.0".to_string(),
-            server_port: 8000,
-            kiro_region: "us-east-1".to_string(),
-            streaming_timeout: 300,
-            token_refresh_threshold: 300,
-            first_token_timeout: 15,
-            http_max_connections: 20,
-            http_connect_timeout: 30,
-            http_request_timeout: 300,
-            http_max_retries: 3,
-            debug_mode: crate::config::DebugMode::Off,
-            log_level: "info".to_string(),
-            tool_description_max_length: 10000,
             fake_reasoning_enabled: false,
-            fake_reasoning_max_tokens: 4000,
-            fake_reasoning_handling: crate::config::FakeReasoningHandling::AsReasoningContent,
-            truncation_recovery: true,
-            guardrails_enabled: false,
-            mcp_enabled: false,
-            mcp_tool_execution_timeout: 30,
-            mcp_health_check_interval: 10,
-            mcp_tool_sync_interval: 600,
-            mcp_max_consecutive_failures: 5,
-            database_url: None,
-            proxy_api_key: None,
-            kiro_refresh_token: None,
-            kiro_client_id: None,
-            kiro_client_secret: None,
-            kiro_sso_url: None,
-            kiro_sso_region: None,
-            google_client_id: String::new(),
-            google_client_secret: String::new(),
-            google_callback_url: String::new(),
+            ..Config::with_defaults()
         }
     }
 
