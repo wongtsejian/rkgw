@@ -32,6 +32,10 @@ pub enum ApiError {
     #[error("Validation error: {0}")]
     ValidationError(String),
 
+    /// Context length exceeded (triggers /compact in Claude Code)
+    #[error("Context length exceeded: {0}")]
+    ContextLengthExceeded(String),
+
     /// Internal server error
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -49,6 +53,17 @@ impl IntoResponse for ApiError {
             }
             ApiError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "config_error", msg),
             ApiError::ValidationError(msg) => (StatusCode::BAD_REQUEST, "validation_error", msg),
+            ApiError::ContextLengthExceeded(msg) => {
+                // Return Anthropic-format error so Claude Code triggers /compact
+                let body = Json(json!({
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": msg,
+                    }
+                }));
+                return (StatusCode::BAD_REQUEST, body).into_response();
+            }
             ApiError::Internal(err) => {
                 // Log internal errors
                 tracing::error!("Internal error: {:?}", err);

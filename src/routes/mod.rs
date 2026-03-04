@@ -92,6 +92,7 @@ fn error_type_from_api_error(err: &ApiError) -> &'static str {
         ApiError::Internal(_) => "internal",
         ApiError::InvalidModel(_) => "validation",
         ApiError::ConfigError(_) => "config",
+        ApiError::ContextLengthExceeded(_) => "context_length_exceeded",
     }
 }
 

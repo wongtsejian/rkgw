@@ -191,6 +191,14 @@ impl KiroHttpClient {
                         attempt = attempt + 1,
                         "HTTP request failed with error response"
                     );
+
+                    // Detect context-length errors so clients (e.g. Claude Code) can trigger /compact
+                    if status.as_u16() == 400 && error_text.contains("CONTENT_LENGTH_EXCEEDS_THRESHOLD") {
+                        return Err(ApiError::ContextLengthExceeded(
+                            "Input is too long. Please use /compact to reduce context length.".to_string(),
+                        ));
+                    }
+
                     return Err(ApiError::KiroApiError {
                         status: status.as_u16(),
                         message: error_text,
