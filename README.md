@@ -23,11 +23,11 @@ This project is a Rust rewrite of the original [kiro-gateway](https://github.com
 
 ## Supported Models
 
-| Model                  | Description                                           |
-| ---------------------- | ----------------------------------------------------- |
-| **Claude Opus 4.6**    | Latest flagship. Adaptive thinking, complex reasoning |
-| **Claude Sonnet 4.6**  | Latest balanced. Coding, writing, general-purpose     |
-| **Claude Haiku 4.5**   | Lightning fast. Quick responses, simple tasks         |
+| Model                 | Description                                           |
+| --------------------- | ----------------------------------------------------- |
+| **Claude Opus 4.6**   | Latest flagship. Adaptive thinking, complex reasoning |
+| **Claude Sonnet 4.6** | Latest balanced. Coding, writing, general-purpose     |
+| **Claude Haiku 4.5**  | Lightning fast. Quick responses, simple tasks         |
 
 > **Smart Model Resolution:** Use any model name format — `claude-sonnet-4-6`, `claude-sonnet-4.6`, or versioned names like `claude-sonnet-4-20250514`. The gateway normalizes them automatically.
 
@@ -35,29 +35,79 @@ This project is a Rust rewrite of the original [kiro-gateway](https://github.com
 
 ## Features
 
-| Feature                         | Description                                                        |
-| ------------------------------- | ------------------------------------------------------------------ |
-| **OpenAI-compatible API**       | Works with any OpenAI-compatible tool (`/v1/chat/completions`)     |
-| **Anthropic-compatible API**    | Native `/v1/messages` endpoint                                     |
-| **Extended Thinking**           | Reasoning support with adaptive effort levels                      |
-| **Vision Support**              | Send images to model                                               |
-| **Tool Calling**                | Function calling support                                           |
-| **Full message history**        | Complete conversation context                                      |
-| **SSE Streaming**               | Full server-sent events streaming support                          |
-| **Retry Logic**                 | Automatic retries with truncation recovery                         |
-| **Multi-user support**          | Per-user Kiro credentials and API keys                             |
-| **Google SSO**                  | Sign in with Google (PKCE + OpenID Connect) for web UI             |
-| **Role-based access control**   | Admin and User roles with granular permissions                     |
-| **MCP Gateway**                 | Connect external MCP tool servers (HTTP/SSE/STDIO) for tool injection into chat requests |
-| **Content Guardrails**          | AWS Bedrock-powered input/output content validation with CEL rule engine |
-| **Web UI Dashboard**            | Real-time metrics, logs, configuration, and user management        |
-| **Let's Encrypt TLS**           | Automated HTTPS via certbot with auto-renewal                      |
+| Feature                       | Description                                                                              |
+| ----------------------------- | ---------------------------------------------------------------------------------------- |
+| **OpenAI-compatible API**     | Works with any OpenAI-compatible tool (`/v1/chat/completions`)                           |
+| **Anthropic-compatible API**  | Native `/v1/messages` endpoint                                                           |
+| **Extended Thinking**         | Reasoning support with adaptive effort levels                                            |
+| **Vision Support**            | Send images to model                                                                     |
+| **Tool Calling**              | Function calling support                                                                 |
+| **Full message history**      | Complete conversation context                                                            |
+| **SSE Streaming**             | Full server-sent events streaming support                                                |
+| **Retry Logic**               | Automatic retries with truncation recovery                                               |
+| **Multi-user support**        | Per-user Kiro credentials and API keys                                                   |
+| **Google SSO**                | Sign in with Google (PKCE + OpenID Connect) for web UI                                   |
+| **Role-based access control** | Admin and User roles with granular permissions                                           |
+| **MCP Gateway**               | Connect external MCP tool servers (HTTP/SSE/STDIO) for tool injection into chat requests |
+| **Content Guardrails**        | AWS Bedrock-powered input/output content validation with CEL rule engine                 |
+| **Web UI Dashboard**          | Real-time metrics, logs, configuration, and user management                              |
+| **Let's Encrypt TLS**         | Automated HTTPS via certbot with auto-renewal                                            |
+| **Proxy-only mode**           | Single API key, no DB/SSO — just a pure proxy (`docker-compose.gateway.yml`)             |
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### Proxy-Only Mode
+
+If you just want a simple proxy without PostgreSQL, Google SSO, or the web UI:
+
+```bash
+git clone https://github.com/if414013/rkgw.git
+cd rkgw
+```
+
+Create `.env.proxy`:
+
+```env
+PROXY_API_KEY=your-secret-api-key
+KIRO_REGION=us-east-1
+# For Identity Center (pro): set your SSO URL
+# KIRO_SSO_URL=https://your-org.awsapps.com/start
+# KIRO_SSO_REGION=us-east-1
+```
+
+```bash
+docker compose -f docker-compose.gateway.yml --env-file .env.proxy up
+```
+
+On first boot, the container runs a device code flow — check the logs for a URL to open in your browser:
+
+```
+╔═══════════════════════════════════════════════════════════╗
+║  Open this URL in your browser to authorize:             ║
+║  https://device.sso.us-east-1.amazonaws.com/?user_code=… ║
+╚═══════════════════════════════════════════════════════════╝
+```
+
+Credentials are cached in a Docker volume — you only need to authorize once. On subsequent restarts, the gateway reuses the cached tokens automatically.
+
+That's it — the gateway starts on port 8000 and authenticates requests with `PROXY_API_KEY`:
+
+```bash
+curl http://localhost:8000/v1/chat/completions \
+  -H "Authorization: Bearer your-secret-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4-6",
+    "messages": [{"role": "user", "content": "Hello!"}],
+    "stream": true
+  }'
+```
+
+### Full Deployment (Multi-User)
+
+#### Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
 - A domain name pointing to your server (for Let's Encrypt TLS)
@@ -126,12 +176,12 @@ Internet → nginx (frontend, :443/:80)
 
 Four docker-compose services:
 
-| Service      | Image                       | Description                                        |
-| ------------ | --------------------------- | -------------------------------------------------- |
-| **db**       | `postgres:16-alpine`        | PostgreSQL database for config, users, API keys, guardrails rules, and MCP client state |
-| **backend**  | `kiro-gateway-backend`      | Rust API server (Axum 0.7 + Tokio) with MCP Gateway and content guardrails |
-| **frontend** | `kiro-gateway-frontend`     | nginx serving React SPA + reverse proxy to backend  |
-| **certbot**  | `certbot/certbot`           | Let's Encrypt certificate provisioning and renewal  |
+| Service      | Image                   | Description                                                                             |
+| ------------ | ----------------------- | --------------------------------------------------------------------------------------- |
+| **db**       | `postgres:16-alpine`    | PostgreSQL database for config, users, API keys, guardrails rules, and MCP client state |
+| **backend**  | `kiro-gateway-backend`  | Rust API server (Axum 0.7 + Tokio) with MCP Gateway and content guardrails              |
+| **frontend** | `kiro-gateway-frontend` | nginx serving React SPA + reverse proxy to backend                                      |
+| **certbot**  | `certbot/certbot`       | Let's Encrypt certificate provisioning and renewal                                      |
 
 ### Authentication
 
@@ -145,18 +195,32 @@ Two separate auth systems:
 
 ## Configuration
 
-### Environment Variables
+### Proxy-Only Environment Variables
+
+For proxy-only mode (`docker-compose.gateway.yml`):
+
+| Variable          | Required | Default       | Description                               |
+| ----------------- | -------- | ------------- | ----------------------------------------- |
+| `PROXY_API_KEY`   | Yes      |               | API key clients use to authenticate       |
+| `KIRO_SSO_URL`    | No       |               | Identity Center URL (omit for Builder ID) |
+| `KIRO_SSO_REGION` | No       | same as above | AWS SSO OIDC region                       |
+| `KIRO_REGION`     | No       | `us-east-1`   | Kiro API region                           |
+| `SERVER_PORT`     | No       | `8000`        | Listen port                               |
+| `LOG_LEVEL`       | No       | `info`        | `debug`, `info`, `warn`, `error`          |
+| `DEBUG_MODE`      | No       | `off`         | `off`, `errors`, `all`                    |
+
+### Full Deployment Environment Variables
 
 Set in `.env` (see `.env.example`):
 
-| Variable                | Required | Description                                              |
-| ----------------------- | -------- | -------------------------------------------------------- |
-| `DOMAIN`                | Yes      | Domain for Let's Encrypt TLS certs                       |
-| `EMAIL`                 | Yes      | Let's Encrypt notification email                         |
-| `POSTGRES_PASSWORD`     | Yes      | PostgreSQL password                                      |
-| `GOOGLE_CLIENT_ID`      | Yes      | Google OAuth Client ID                                   |
-| `GOOGLE_CLIENT_SECRET`  | Yes      | Google OAuth Client Secret                               |
-| `GOOGLE_CALLBACK_URL`   | Yes      | OAuth callback URL                                       |
+| Variable               | Required | Description                        |
+| ---------------------- | -------- | ---------------------------------- |
+| `DOMAIN`               | Yes      | Domain for Let's Encrypt TLS certs |
+| `EMAIL`                | Yes      | Let's Encrypt notification email   |
+| `POSTGRES_PASSWORD`    | Yes      | PostgreSQL password                |
+| `GOOGLE_CLIENT_ID`     | Yes      | Google OAuth Client ID             |
+| `GOOGLE_CLIENT_SECRET` | Yes      | Google OAuth Client Secret         |
+| `GOOGLE_CALLBACK_URL`  | Yes      | OAuth callback URL                 |
 
 Auto-set by docker-compose: `DATABASE_URL`, `SERVER_HOST` (0.0.0.0), `SERVER_PORT` (8000).
 
@@ -171,20 +235,24 @@ All runtime settings — region, timeouts, debug mode, allowed domains, etc. —
 ### Endpoints
 
 **Proxy (auth via per-user API key):**
+
 - `POST /v1/chat/completions` — OpenAI-compatible
 - `POST /v1/messages` — Anthropic-compatible
 - `GET /v1/models` — List available models
 
 **MCP (auth via API key):**
+
 - `POST /v1/mcp/tool/execute` — Execute an MCP tool
 - `POST /mcp` — JSON-RPC 2.0 MCP server protocol
 - `GET /mcp` — MCP SSE stream
 
 **Infrastructure:**
+
 - `GET /health` — Health check
 - `GET /` — Status JSON
 
 **Web UI (`/_ui/`):**
+
 - Dashboard with real-time metrics and logs (SSE)
 - User management and role-based access control
 - Per-user API key generation and Kiro token management
@@ -243,11 +311,11 @@ To use this gateway with [OpenCode](https://opencode.ai), add the following prov
 
 #### Tested Model Limits
 
-| Model               | Context (tokens) | Max output tokens | Notes                              |
-| ------------------- | :--------------: | :---------------: | ---------------------------------- |
-| `claude-opus-4.6`   | ~195K            | unknown           | Output probe errored (thinking mode interference) |
-| `claude-sonnet-4.6` | ~195K            | unknown           | Model stopped early |
-| `claude-haiku-4.5`  | ~195K            | unknown           | Model stopped early |
+| Model               | Context (tokens) | Max output tokens | Notes                                             |
+| ------------------- | :--------------: | :---------------: | ------------------------------------------------- |
+| `claude-opus-4.6`   |      ~195K       |      unknown      | Output probe errored (thinking mode interference) |
+| `claude-sonnet-4.6` |      ~195K       |      unknown      | Model stopped early                               |
+| `claude-haiku-4.5`  |      ~195K       |      unknown      | Model stopped early                               |
 
 > Output token cap is unknown because the gateway has thinking mode enabled by default. Anthropic's documented standard limit is **8192 tokens** for all Claude 4.x models.
 
@@ -353,7 +421,7 @@ export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 | Variable                                   | Description                                       |
 | ------------------------------------------ | ------------------------------------------------- |
 | `ANTHROPIC_BASE_URL`                       | Points Claude Code to your gateway                |
-| `ANTHROPIC_AUTH_TOKEN`                      | Your per-user API key from the Web UI             |
+| `ANTHROPIC_AUTH_TOKEN`                     | Your per-user API key from the Web UI             |
 | `CLAUDE_CODE_ENABLE_TELEMETRY`             | Disable telemetry                                 |
 | `DISABLE_PROMPT_CACHING`                   | Disable prompt caching (not supported by gateway) |
 | `DISABLE_NON_ESSENTIAL_MODEL_CALLS`        | Reduce unnecessary API calls                      |
@@ -429,10 +497,10 @@ MCP (Model Context Protocol) tools run locally on your machine, so they bypass t
 }
 ```
 
-| MCP Server | Description |
-| --- | --- |
-| `mcp-server-fetch` | Fetches and extracts content from any URL |
-| `exa-mcp-server` | AI-powered web search via [Exa](https://exa.ai/) (requires an API key) |
+| MCP Server         | Description                                                            |
+| ------------------ | ---------------------------------------------------------------------- |
+| `mcp-server-fetch` | Fetches and extracts content from any URL                              |
+| `exa-mcp-server`   | AI-powered web search via [Exa](https://exa.ai/) (requires an API key) |
 
 > After adding these, restart Claude Code to pick up the new MCP configuration.
 

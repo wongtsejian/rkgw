@@ -39,35 +39,49 @@ async fn main() -> Result<()> {
 
     {
         use tracing_subscriber::prelude::*;
-
         let capture_layer = log_capture::LogCaptureLayer::new(Arc::clone(&log_buffer));
-
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_target(false)
+            .with_thread_ids(false);
         tracing_subscriber::registry()
             .with(env_filter)
             .with(capture_layer)
+            .with(fmt_layer)
             .init();
     }
 
-    tracing::info!("Kiro Gateway starting...");
+    let is_proxy_only = config.is_proxy_only();
 
-    // Connect to the PostgreSQL config database
-    let config_db = if let Some(ref url) = config.database_url {
-        match web_ui::config_db::ConfigDb::connect(url).await {
-            Ok(db) => {
-                tracing::info!("Connected to PostgreSQL database");
-                Some(Arc::new(db))
+    if is_proxy_only {
+        tracing::info!("Kiro Gateway starting in PROXY-ONLY mode...");
+    } else {
+        tracing::info!("Kiro Gateway starting...");
+    }
+
+    // ── Database (skip in proxy-only mode) ──────────────────────────
+    let config_db = if !is_proxy_only {
+        if let Some(ref url) = config.database_url {
+            match web_ui::config_db::ConfigDb::connect(url).await {
+                Ok(db) => {
+                    tracing::info!("Connected to PostgreSQL database");
+                    Some(Arc::new(db))
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to connect to database: {}", e);
+                    None
+                }
             }
-            Err(e) => {
-                tracing::warn!("Failed to connect to database: {}", e);
-                None
-            }
+        } else {
+            None
         }
     } else {
         None
     };
 
-    // Check if setup is complete
-    let setup_complete_flag = if let Some(ref db) = config_db {
+    // ── Setup state ─────────────────────────────────────────────────
+    let setup_complete_flag = if is_proxy_only {
+        true // proxy-only is always "setup complete"
+    } else if let Some(ref db) = config_db {
         db.is_setup_complete().await
     } else {
         false
@@ -75,40 +89,46 @@ async fn main() -> Result<()> {
 
     let setup_complete = Arc::new(AtomicBool::new(setup_complete_flag));
 
-    if setup_complete_flag {
-        // Setup complete — load config from DB
-        if let Some(ref db) = config_db {
-            db.load_into_config(&mut config)
-                .await
-                .context("Failed to load config from database")?;
-            tracing::info!("Configuration loaded from database");
+    if !is_proxy_only {
+        if setup_complete_flag {
+            if let Some(ref db) = config_db {
+                db.load_into_config(&mut config)
+                    .await
+                    .context("Failed to load config from database")?;
+                tracing::info!("Configuration loaded from database");
+            }
+        } else {
+            tracing::warn!("Setup not complete — starting in setup-only mode");
+            tracing::warn!("Visit the web UI to complete initial setup");
         }
-    } else {
-        tracing::warn!("Setup not complete — starting in setup-only mode");
-        tracing::warn!("Visit the web UI to complete initial setup");
     }
 
     tracing::info!(
         "Server configured: {}:{}",
-        config.server_host,
-        config.server_port
+                    config.server_host, config.server_port
     );
     tracing::debug!("Debug mode: {:?}", config.debug_mode);
 
-    // Initialize authentication manager (only when setup is complete)
-    let auth_manager = if setup_complete_flag {
-        init_auth_from_config_db(&config, &config_db).await?
+    // ── Auth manager ────────────────────────────────────────────────
+    let app_auth_manager = if is_proxy_only {
+        let am = auth::AuthManager::new_from_env(&config)
+            .context("Failed to create auth manager from env vars")?;
+        tracing::info!("Bootstrapping proxy-only credentials...");
+        am.bootstrap_proxy_credentials()
+            .await
+            .context("Failed to bootstrap proxy credentials. Check KIRO_REFRESH_TOKEN and KIRO_SSO_REGION.")?;
+        am
+    } else if setup_complete_flag {
+        init_app_auth_from_config_db(&config, &config_db).await?
     } else {
-        Arc::new(
-            auth::AuthManager::new_placeholder(
-                config.kiro_region.clone(),
-                config.token_refresh_threshold,
-            )
-            .context("Failed to create placeholder auth manager")?,
+        auth::AuthManager::new_placeholder(
+            config.kiro_region.clone(),
+            config.token_refresh_threshold,
         )
+        .context("Failed to create placeholder auth manager for AppState")?
     };
 
-    // Initialize HTTP client (token-agnostic; callers set auth per-request)
+    // ── HTTP client ─────────────────────────────────────────────────
     let http_client = Arc::new(http_client::KiroHttpClient::new(
         config.http_max_connections,
         config.http_connect_timeout,
@@ -117,14 +137,14 @@ async fn main() -> Result<()> {
     )?);
     tracing::info!("HTTP client initialized with connection pooling");
 
-    // Initialize model cache
+    // ── Model cache ─────────────────────────────────────────────────
     tracing::info!("Initializing model cache...");
     let model_cache = cache::ModelCache::new(3600); // 1 hour TTL
 
-    // Load models from Kiro API at startup (only when setup is complete)
+    // Load models from Kiro API at startup (proxy-only or setup complete)
     if setup_complete_flag {
         tracing::info!("Loading models from Kiro API...");
-        match load_models_from_kiro(&http_client, &auth_manager, &config).await {
+        match load_models_from_kiro(&http_client, &app_auth_manager, &config).await {
             Ok(models) => {
                 tracing::info!("Models from Kiro API:");
                 for model in &models {
@@ -133,7 +153,6 @@ async fn main() -> Result<()> {
                         serde_json::to_string_pretty(model).unwrap_or_default()
                     );
                 }
-
                 model_cache.update(models);
                 tracing::info!(
                     "Loaded {} models from Kiro API",
@@ -159,17 +178,6 @@ async fn main() -> Result<()> {
     let metrics = Arc::new(metrics::MetricsCollector::new());
     tracing::info!("Metrics collector initialized");
 
-    // Create a separate AuthManager for AppState wrapped in tokio::sync::RwLock
-    let app_auth_manager = if setup_complete_flag {
-        init_app_auth_from_config_db(&config, &config_db).await?
-    } else {
-        auth::AuthManager::new_placeholder(
-            config.kiro_region.clone(),
-            config.token_refresh_threshold,
-        )
-        .context("Failed to create placeholder auth manager for AppState")?
-    };
-
     let mut app_state = routes::AppState {
         model_cache: model_cache.clone(),
         auth_manager: Arc::new(tokio::sync::RwLock::new(app_auth_manager)),
@@ -188,27 +196,29 @@ async fn main() -> Result<()> {
         mcp_manager: None,
     };
 
-    // Initialize guardrails engine if DB is available
-    if let Some(ref db) = app_state.config_db {
-        let guardrails_db = guardrails::db::GuardrailsDb::new(db.pool().clone());
-        match guardrails::engine::GuardrailsEngine::new(&guardrails_db, config.guardrails_enabled)
-            .await
-        {
-            Ok(engine) => {
-                app_state.guardrails_engine = Some(Arc::new(engine));
-                tracing::info!(
-                    "Guardrails engine initialized (enabled: {})",
-                    config.guardrails_enabled
-                );
-            }
-            Err(e) => {
-                tracing::warn!("Failed to initialize guardrails engine: {}", e);
+    // ── Guardrails (skip in proxy-only mode) ────────────────────────
+    if !is_proxy_only {
+        if let Some(ref db) = app_state.config_db {
+            let guardrails_db = guardrails::db::GuardrailsDb::new(db.pool().clone());
+            match guardrails::engine::GuardrailsEngine::new(&guardrails_db, config.guardrails_enabled)
+                .await
+            {
+                Ok(engine) => {
+                    app_state.guardrails_engine = Some(Arc::new(engine));
+                    tracing::info!(
+                        "Guardrails engine initialized (enabled: {})",
+                        config.guardrails_enabled
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to initialize guardrails engine: {}", e);
+                }
             }
         }
     }
 
-    // Initialize MCP Gateway manager if enabled and DB is available
-    if config.mcp_enabled {
+    // ── MCP Gateway (skip in proxy-only mode) ───────────────────────
+    if !is_proxy_only && config.mcp_enabled {
         if let Some(ref db) = app_state.config_db {
             let mcp_db = mcp::db::McpDb::new(db.pool().clone());
             let mgr = mcp::McpManager::new(
@@ -223,14 +233,16 @@ async fn main() -> Result<()> {
         }
     }
 
-    // Start background tasks (token refresh + session cleanup)
-    if let Some(ref db) = app_state.config_db {
-        web_ui::user_kiro::spawn_token_refresh_task(Arc::clone(db));
-        web_ui::session::SessionService::spawn_cleanup_task(
-            Arc::clone(db),
-            Arc::clone(&app_state.session_cache),
-        );
-        tracing::info!("Background tasks started (token refresh, session cleanup)");
+    // ── Background tasks (skip in proxy-only mode) ──────────────────
+    if !is_proxy_only {
+        if let Some(ref db) = app_state.config_db {
+            web_ui::user_kiro::spawn_token_refresh_task(Arc::clone(db));
+            web_ui::session::SessionService::spawn_cleanup_task(
+                Arc::clone(db),
+                Arc::clone(&app_state.session_cache),
+            );
+            tracing::info!("Background tasks started (token refresh, session cleanup)");
+        }
     }
 
     // Clone mcp_manager reference before moving app_state into the router
@@ -495,10 +507,12 @@ fn print_startup_banner(config: &config::Config) {
         },
         config.fake_reasoning_max_tokens
     );
-    println!(
-        "  Web UI:      http://{}:{}/_ui/",
-        config.server_host, config.server_port
-    );
+    if !config.is_proxy_only() {
+        println!(
+            "  Web UI:      http://{}:{}/_ui/",
+            config.server_host, config.server_port
+        );
+    }
     println!();
 }
 
