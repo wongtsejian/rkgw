@@ -595,7 +595,10 @@ fn require_config_db(state: &AppState) -> Result<Arc<ConfigDb>, ApiError> {
 fn redirect_login_error(error: &str) -> Result<Response, ApiError> {
     Ok(Response::builder()
         .status(302)
-        .header("Location", format!("/_ui/login?error={}", urlencoding::encode(error)))
+        .header(
+            "Location",
+            format!("/_ui/login?error={}", urlencoding::encode(error)),
+        )
         .body(Body::empty())
         .unwrap())
 }
@@ -603,7 +606,10 @@ fn redirect_login_error(error: &str) -> Result<Response, ApiError> {
 fn redirect_login_error_inner(error: &str) -> Response {
     Response::builder()
         .status(302)
-        .header("Location", format!("/_ui/login?error={}", urlencoding::encode(error)))
+        .header(
+            "Location",
+            format!("/_ui/login?error={}", urlencoding::encode(error)),
+        )
         .body(Body::empty())
         .unwrap()
 }
