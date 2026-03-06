@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use axum::extract::{Path, State};
-use axum::routing::{delete, get};
+use axum::routing::{delete, get, put};
 use axum::{Extension, Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -444,6 +444,125 @@ async fn remove_domain(
     Ok(Json(DomainOpResponse { ok: true }))
 }
 
+// ── User Management ─────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct RoleUpdateRequest {
+    role: String,
+}
+
+/// GET /_ui/api/users — list all users (admin only)
+async fn list_users(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_db = state
+        .config_db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Database not configured")))?;
+
+    let rows = config_db.list_users().await.map_err(ApiError::Internal)?;
+
+    let users: Vec<serde_json::Value> = rows
+        .into_iter()
+        .map(|(id, email, name, picture_url, role, created_at, last_login)| {
+            serde_json::json!({
+                "id": id,
+                "email": email,
+                "name": name,
+                "picture_url": picture_url,
+                "role": role,
+                "created_at": created_at,
+                "last_login": last_login,
+            })
+        })
+        .collect();
+
+    Ok(Json(serde_json::json!({ "users": users })))
+}
+
+/// PUT /_ui/api/users/:id/role — update user role (admin only)
+async fn update_user_role(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    Path(user_id): Path<Uuid>,
+    Json(body): Json<RoleUpdateRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_db = state
+        .config_db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Database not configured")))?;
+
+    if body.role != "admin" && body.role != "user" {
+        return Err(ApiError::ValidationError(
+            "Role must be 'admin' or 'user'".to_string(),
+        ));
+    }
+
+    // Prevent demoting the last admin
+    if body.role == "user" && session.user_id == user_id {
+        let admin_count = config_db.count_admins().await.map_err(ApiError::Internal)?;
+        if admin_count <= 1 {
+            return Err(ApiError::ValidationError(
+                "Cannot demote the last admin".to_string(),
+            ));
+        }
+    }
+
+    let rows = config_db
+        .update_user_role(user_id, &body.role)
+        .await
+        .map_err(ApiError::Internal)?;
+
+    if rows == 0 {
+        return Err(ApiError::ValidationError("User not found".to_string()));
+    }
+
+    tracing::info!(
+        admin_id = %session.user_id,
+        target_user = %user_id,
+        new_role = %body.role,
+        "user_role_updated"
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
+/// DELETE /_ui/api/users/:id — delete user (admin only)
+async fn delete_user(
+    State(state): State<AppState>,
+    Extension(session): Extension<SessionInfo>,
+    Path(user_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_db = state
+        .config_db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Database not configured")))?;
+
+    // Prevent self-deletion
+    if session.user_id == user_id {
+        return Err(ApiError::ValidationError(
+            "Cannot delete your own account".to_string(),
+        ));
+    }
+
+    let rows = config_db
+        .delete_user(user_id)
+        .await
+        .map_err(ApiError::Internal)?;
+
+    if rows == 0 {
+        return Err(ApiError::ValidationError("User not found".to_string()));
+    }
+
+    tracing::info!(
+        admin_id = %session.user_id,
+        deleted_user = %user_id,
+        "user_deleted"
+    );
+
+    Ok(Json(serde_json::json!({ "ok": true })))
+}
+
 // ── Router ───────────────────────────────────────────────────────────
 
 /// Build the domain allowlist management router (admin only).
@@ -451,6 +570,14 @@ pub fn domain_routes() -> Router<AppState> {
     Router::new()
         .route("/domains", get(list_domains).post(add_domain))
         .route("/domains/{domain}", delete(remove_domain))
+}
+
+/// Build the user management router (admin only).
+pub fn user_routes() -> Router<AppState> {
+    Router::new()
+        .route("/users", get(list_users))
+        .route("/users/{id}/role", put(update_user_role))
+        .route("/users/{id}", delete(delete_user))
 }
 
 #[cfg(test)]

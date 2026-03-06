@@ -52,3 +52,6 @@ certs/
 
 .flox/
 target/
+
+# Playwright MCP
+.playwright-mcp/

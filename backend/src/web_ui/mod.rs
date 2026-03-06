@@ -83,6 +83,7 @@ pub fn web_ui_routes(state: AppState) -> Router {
     let admin_api_routes = Router::new()
         .route("/config", put(routes::update_config))
         .merge(config_api::domain_routes())
+        .merge(config_api::user_routes())
         .merge(crate::guardrails::api::guardrails_routes())
         .nest("/admin/mcp", crate::mcp::api::mcp_admin_routes())
         .layer(axum::middleware::from_fn(google_auth::admin_middleware))

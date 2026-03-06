@@ -167,6 +167,10 @@ Defined in `backend/src/routes/mod.rs`:
 - Admin-only: MCP client CRUD routes (`/_ui/api/admin/mcp/clients/*`)
 - Admin-only: Guardrails profile/rule CRUD routes (`/_ui/api/guardrails/*`), CEL validation, profile testing
 
+## Playwright
+
+All Playwright screenshots and artifacts must be saved to `.playwright-mcp/` (gitignored).
+
 ## Code Style
 
 ### Imports
