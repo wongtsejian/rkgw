@@ -63,8 +63,14 @@ pub fn normalize_model_name(name: &str) -> String {
         return caps.get(1).unwrap().as_str().to_string();
     }
 
-    // No transformation needed - return as-is (preserving original case)
-    name.to_string()
+    if name_lower.starts_with("claude") || name_lower == "auto" {
+        // Already-normalized Claude model or "auto" — pass through
+        name.to_string()
+    } else {
+        // Unrecognized model name — default to auto
+        tracing::warn!(original = %name, "Unrecognized model name, defaulting to auto");
+        "auto".to_string()
+    }
 }
 
 /// Extract model family from model name
@@ -234,7 +240,10 @@ mod tests {
 
         // Pass-through (no transformation)
         assert_eq!(normalize_model_name("auto"), "auto");
-        assert_eq!(normalize_model_name("gpt-4"), "gpt-4");
+
+        // Unrecognized models default to "auto"
+        assert_eq!(normalize_model_name("gpt-4"), "auto");
+        assert_eq!(normalize_model_name("inherit"), "auto");
     }
 
     #[test]
@@ -285,9 +294,9 @@ mod tests {
         assert_eq!(result.source, "hidden");
         assert!(result.is_verified);
 
-        // Test pass-through
+        // Unrecognized models default to "auto"
         let result = resolver.resolve("gpt-4");
-        assert_eq!(result.internal_id, "gpt-4");
+        assert_eq!(result.internal_id, "auto");
         assert_eq!(result.source, "passthrough");
         assert!(!result.is_verified);
     }
