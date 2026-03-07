@@ -563,6 +563,78 @@ async fn delete_user(
     Ok(Json(serde_json::json!({ "ok": true })))
 }
 
+/// GET /_ui/api/users/:id — get user detail (admin only)
+async fn get_user_detail(
+    State(state): State<AppState>,
+    Path(user_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let config_db = state
+        .config_db
+        .as_ref()
+        .ok_or_else(|| ApiError::Internal(anyhow::anyhow!("Database not configured")))?;
+
+    // Fetch user (query with last_login since UserRow doesn't include it)
+    #[allow(clippy::type_complexity)]
+    let user_row: Option<(Uuid, String, Option<String>, Option<String>, String, DateTime<Utc>, Option<DateTime<Utc>>)> =
+        sqlx::query_as(
+            "SELECT id, email, name, picture_url, role, created_at, last_login FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(config_db.pool())
+        .await
+        .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to get user: {}", e)))?;
+
+    let (id, email, name, picture_url, role, created_at, last_login) =
+        user_row.ok_or_else(|| ApiError::ValidationError("User not found".to_string()))?;
+
+    // Fetch API keys
+    let api_keys_rows = config_db
+        .list_api_keys(user_id)
+        .await
+        .map_err(ApiError::Internal)?;
+
+    let api_keys: Vec<serde_json::Value> = api_keys_rows
+        .into_iter()
+        .map(|(kid, prefix, label, last_used, key_created)| {
+            serde_json::json!({
+                "id": kid,
+                "key_prefix": prefix,
+                "label": label,
+                "last_used": last_used,
+                "created_at": key_created,
+            })
+        })
+        .collect();
+
+    // Fetch Kiro token status (never expose actual tokens)
+    let kiro_token = config_db
+        .get_kiro_token(user_id)
+        .await
+        .map_err(ApiError::Internal)?;
+
+    let kiro_status = match kiro_token {
+        Some((_refresh, _access, expiry)) => {
+            let expired = expiry.is_none_or(|exp| exp < Utc::now());
+            serde_json::json!({ "has_token": true, "expired": expired })
+        }
+        None => serde_json::json!({ "has_token": false, "expired": false }),
+    };
+
+    Ok(Json(serde_json::json!({
+        "user": {
+            "id": id,
+            "email": email,
+            "name": name,
+            "picture_url": picture_url,
+            "role": role,
+            "created_at": created_at,
+            "last_login": last_login,
+        },
+        "api_keys": api_keys,
+        "kiro_status": kiro_status,
+    })))
+}
+
 // ── Router ───────────────────────────────────────────────────────────
 
 /// Build the domain allowlist management router (admin only).
@@ -577,7 +649,7 @@ pub fn user_routes() -> Router<AppState> {
     Router::new()
         .route("/users", get(list_users))
         .route("/users/{id}/role", put(update_user_role))
-        .route("/users/{id}", delete(delete_user))
+        .route("/users/{id}", get(get_user_detail).delete(delete_user))
 }
 
 #[cfg(test)]

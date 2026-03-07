@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { apiFetch, apiPut, apiDelete } from '../lib/api'
 import type { User } from '../lib/api'
 import { useToast } from './Toast'
@@ -72,21 +73,23 @@ export function UserTable() {
             {users.map(u => (
               <tr key={u.id}>
                 <td>
-                  {u.picture_url && (
-                    <img
-                      src={u.picture_url}
-                      alt=""
-                      style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 'var(--radius-sm)',
-                        marginRight: 8,
-                        verticalAlign: 'middle',
-                        opacity: 0.8,
-                      }}
-                    />
-                  )}
-                  {u.email}
+                  <Link to={`/admin/users/${u.id}`} style={{ color: 'var(--text)', textDecoration: 'none' }}>
+                    {u.picture_url && (
+                      <img
+                        src={u.picture_url}
+                        alt=""
+                        style={{
+                          width: 18,
+                          height: 18,
+                          borderRadius: 'var(--radius-sm)',
+                          marginRight: 8,
+                          verticalAlign: 'middle',
+                          opacity: 0.8,
+                        }}
+                      />
+                    )}
+                    {u.email}
+                  </Link>
                 </td>
                 <td style={{ color: 'var(--text-secondary)' }}>{u.name}</td>
                 <td>

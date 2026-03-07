@@ -106,6 +106,6 @@ pub fn web_ui_routes(state: AppState) -> Router {
 
     Router::new()
         .nest("/_ui/api", session_api_routes)
-        .nest("/_ui/api", admin_api_routes)
-        .nest("/_ui/api", public_api_routes)
+        .merge(Router::new().nest("/_ui/api", admin_api_routes))
+        .merge(Router::new().nest("/_ui/api", public_api_routes))
 }

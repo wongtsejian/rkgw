@@ -145,6 +145,12 @@ export interface DomainInfo {
   created_at: string
 }
 
+export interface UserDetailResponse {
+  user: User
+  api_keys: ApiKeyInfo[]
+  kiro_status: KiroStatus
+}
+
 // --- Guardrails Types ---
 
 export interface GuardrailProfile {
