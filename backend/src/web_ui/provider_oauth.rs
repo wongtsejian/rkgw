@@ -74,24 +74,36 @@ fn anthropic_config() -> ProviderOAuthConfig {
         auth_url: "https://claude.ai/oauth/authorize",
         redirect_uri: "http://localhost:54545/callback",
         port: 54545,
-        scopes: &["openid", "email", "profile"],
+        scopes: &["org:create_api_key", "user:profile", "user:inference"],
     }
 }
 
-fn gemini_config() -> ProviderOAuthConfig {
-    ProviderOAuthConfig {
-        client_id: std::env::var("GEMINI_OAUTH_CLIENT_ID").unwrap_or_default(),
-        client_secret: std::env::var("GEMINI_OAUTH_CLIENT_SECRET").unwrap_or_default(),
+fn gemini_config() -> Result<ProviderOAuthConfig, ApiError> {
+    let client_id = std::env::var("GEMINI_OAUTH_CLIENT_ID")
+        .or_else(|_| std::env::var("GOOGLE_CLIENT_ID"))
+        .unwrap_or_default();
+    let client_secret = std::env::var("GEMINI_OAUTH_CLIENT_SECRET")
+        .or_else(|_| std::env::var("GOOGLE_CLIENT_SECRET"))
+        .unwrap_or_default();
+    if client_id.is_empty() || client_secret.is_empty() {
+        return Err(ApiError::ValidationError(
+            "Gemini OAuth requires GEMINI_OAUTH_CLIENT_ID/GOOGLE_CLIENT_ID and GEMINI_OAUTH_CLIENT_SECRET/GOOGLE_CLIENT_SECRET environment variables".into(),
+        ));
+    }
+    Ok(ProviderOAuthConfig {
+        client_id,
+        client_secret,
         token_url: "https://oauth2.googleapis.com/token",
         auth_url: "https://accounts.google.com/o/oauth2/v2/auth",
         redirect_uri: "http://localhost:8085/oauth2callback",
         port: 8085,
         scopes: &[
             "openid",
-            "email",
-            "https://www.googleapis.com/auth/generative-language",
+            "https://www.googleapis.com/auth/cloud-platform",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
         ],
-    }
+    })
 }
 
 fn openai_config() -> ProviderOAuthConfig {
@@ -100,17 +112,17 @@ fn openai_config() -> ProviderOAuthConfig {
             .unwrap_or_else(|_| "app_EMoamEEZ73f0CkXaXp7hrann".to_string()),
         client_secret: String::new(),
         token_url: "https://auth.openai.com/oauth/token",
-        auth_url: "https://auth.openai.com/authorize",
+        auth_url: "https://auth.openai.com/oauth/authorize",
         redirect_uri: "http://localhost:1455/auth/callback",
         port: 1455,
-        scopes: &["openid", "email", "profile"],
+        scopes: &["openid", "email", "profile", "offline_access"],
     }
 }
 
 fn get_provider_config(provider: &str) -> Result<ProviderOAuthConfig, ApiError> {
     match provider {
         "anthropic" => Ok(anthropic_config()),
-        "gemini" => Ok(gemini_config()),
+        "gemini" => gemini_config(),
         "openai" => Ok(openai_config()),
         _ => Err(ApiError::ValidationError(format!(
             "Unknown provider: {}",
@@ -148,11 +160,13 @@ fn validate_domain(domain: &str) -> Result<(), ApiError> {
 
 // ── PKCE Helpers ─────────────────────────────────────────────────────
 
-/// Generate a PKCE code verifier (43-128 chars, URL-safe).
+/// Generate a PKCE code verifier (128 chars, URL-safe, matching CLIProxyAPI).
 fn generate_pkce_verifier() -> String {
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
-    let random_bytes: [u8; 32] = rand::random();
+    use rand::Rng;
+    let mut random_bytes = [0u8; 96];
+    rand::thread_rng().fill(&mut random_bytes[..]);
     URL_SAFE_NO_PAD.encode(random_bytes)
 }
 
@@ -308,7 +322,7 @@ impl TokenExchanger for HttpTokenExchanger {
 }
 
 impl HttpTokenExchanger {
-    /// Extract email from id_token JWT (Anthropic, OpenAI) or userinfo endpoint (Gemini).
+    /// Extract email from token response (Anthropic), id_token JWT (OpenAI), or userinfo endpoint (Gemini).
     async fn extract_email(
         &self,
         provider: &str,
@@ -316,6 +330,13 @@ impl HttpTokenExchanger {
         access_token: &str,
     ) -> String {
         match provider {
+            "anthropic" => {
+                // Anthropic: email is in token response at account.email_address
+                token_response["account"]["email_address"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string()
+            }
             "gemini" => {
                 // Gemini: call Google userinfo endpoint
                 if let Ok(resp) = self
@@ -332,7 +353,7 @@ impl HttpTokenExchanger {
                 String::new()
             }
             _ => {
-                // Anthropic, OpenAI: decode id_token JWT payload
+                // OpenAI: decode id_token JWT payload
                 if let Some(id_token) = token_response["id_token"].as_str() {
                     if let Some(email) = decode_jwt_email(id_token) {
                         return email;
@@ -433,6 +454,8 @@ async fn provider_connect(
     headers: axum::http::HeaderMap,
 ) -> Result<Json<ConnectResponse>, ApiError> {
     validate_provider(&provider)?;
+    // Validate provider config early (catches missing Gemini env vars)
+    get_provider_config(&provider)?;
 
     // Derive base URL from request headers (respects reverse proxy)
     // Priority: Origin (browser-set) > X-Forwarded-Host > Host
@@ -536,18 +559,33 @@ async fn relay_script(
     }
 
     let config = get_provider_config(&provider)?;
-    let host = headers
-        .get("host")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost");
-    let scheme = headers
-        .get("x-forwarded-proto")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or(if host.starts_with("localhost") { "http" } else { "https" });
+
+    // Derive base URL from request headers (same logic as provider_connect)
+    let (scheme, host) = if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        if let Some(rest) = origin.strip_prefix("https://") {
+            ("https", rest.to_string())
+        } else if let Some(rest) = origin.strip_prefix("http://") {
+            ("http", rest.to_string())
+        } else {
+            ("https", origin.to_string())
+        }
+    } else {
+        let h = headers
+            .get("x-forwarded-host")
+            .or_else(|| headers.get("host"))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("localhost")
+            .to_string();
+        let s = headers
+            .get("x-forwarded-proto")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or(if h.starts_with("localhost") { "http" } else { "https" });
+        (s, h)
+    };
 
     // Build auth URL
     let scopes = config.scopes.join(" ");
-    let auth_url = format!(
+    let mut auth_url = format!(
         "{}?response_type=code&client_id={}&redirect_uri={}&scope={}&state={}&code_challenge={}&code_challenge_method=S256",
         config.auth_url,
         urlencoding::encode(&config.client_id),
@@ -556,6 +594,17 @@ async fn relay_script(
         urlencoding::encode(&pending_state.state),
         urlencoding::encode(&pkce_challenge(&pending_state.pkce_verifier)),
     );
+
+    // Provider-specific extra params
+    match provider.as_str() {
+        "openai" => {
+            auth_url.push_str("&prompt=login&id_token_add_organizations=true&codex_cli_simplified_flow=true");
+        }
+        "gemini" => {
+            auth_url.push_str("&access_type=offline&prompt=consent");
+        }
+        _ => {}
+    }
 
     let relay_url = format!("{}://{}/_ui/api/providers/{}/relay", scheme, host, provider);
 
@@ -813,7 +862,7 @@ mod tests {
     #[test]
     fn test_pkce_verifier_length() {
         let verifier = generate_pkce_verifier();
-        assert!(verifier.len() >= 43);
+        assert_eq!(verifier.len(), 128);
     }
 
     #[test]
@@ -866,6 +915,12 @@ mod tests {
     #[test]
     fn test_get_provider_config_all() {
         assert!(get_provider_config("anthropic").is_ok());
+        // Gemini requires env vars — test that it errors without them
+        std::env::remove_var("GEMINI_OAUTH_CLIENT_ID");
+        assert!(get_provider_config("gemini").is_err());
+        // With env vars set, it should succeed
+        std::env::set_var("GEMINI_OAUTH_CLIENT_ID", "test-id");
+        std::env::set_var("GEMINI_OAUTH_CLIENT_SECRET", "test-secret");
         assert!(get_provider_config("gemini").is_ok());
         assert!(get_provider_config("openai").is_ok());
         assert!(get_provider_config("unknown").is_err());
@@ -874,6 +929,8 @@ mod tests {
     #[test]
     fn test_provider_config_ports() {
         assert_eq!(get_provider_config("anthropic").unwrap().port, 54545);
+        std::env::set_var("GEMINI_OAUTH_CLIENT_ID", "test-id");
+        std::env::set_var("GEMINI_OAUTH_CLIENT_SECRET", "test-secret");
         assert_eq!(get_provider_config("gemini").unwrap().port, 8085);
         assert_eq!(get_provider_config("openai").unwrap().port, 1455);
     }
