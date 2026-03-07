@@ -305,6 +305,12 @@ impl AuthManager {
         let creds = self.credentials.read().await;
         creds.profile_arn.clone()
     }
+
+    /// Check whether shared credentials are configured (refresh token + client ID)
+    pub async fn has_credentials(&self) -> bool {
+        let creds = self.credentials.read().await;
+        !creds.refresh_token.is_empty() && creds.client_id.is_some()
+    }
 }
 
 #[cfg(test)]

@@ -158,26 +158,30 @@ async fn main() -> Result<()> {
 
     // Load models from Kiro API at startup (proxy-only or setup complete)
     if setup_complete_flag {
-        tracing::info!("Loading models from Kiro API...");
-        match load_models_from_kiro(&http_client, &app_auth_manager, &config).await {
-            Ok(models) => {
-                tracing::info!("Models from Kiro API:");
-                for model in &models {
+        if app_auth_manager.has_credentials().await {
+            tracing::info!("Loading models from Kiro API...");
+            match load_models_from_kiro(&http_client, &app_auth_manager, &config).await {
+                Ok(models) => {
+                    tracing::info!("Models from Kiro API:");
+                    for model in &models {
+                        tracing::info!(
+                            "{}",
+                            serde_json::to_string_pretty(model).unwrap_or_default()
+                        );
+                    }
+                    model_cache.update(models);
                     tracing::info!(
-                        "{}",
-                        serde_json::to_string_pretty(model).unwrap_or_default()
+                        "Loaded {} models from Kiro API",
+                        model_cache.get_all_model_ids().len()
                     );
                 }
-                model_cache.update(models);
-                tracing::info!(
-                    "Loaded {} models from Kiro API",
-                    model_cache.get_all_model_ids().len()
-                );
+                Err(e) => {
+                    tracing::error!("Failed to load models from Kiro API: {}", e);
+                    tracing::warn!("Server will start but model list will be empty");
+                }
             }
-            Err(e) => {
-                tracing::error!("Failed to load models from Kiro API: {}", e);
-                tracing::warn!("Server will start but model list will be empty");
-            }
+        } else {
+            tracing::info!("No shared credentials — model list will be populated on first user request");
         }
     } else {
         tracing::info!("Skipping model loading — setup not complete");
