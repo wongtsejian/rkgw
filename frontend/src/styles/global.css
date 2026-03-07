@@ -96,3 +96,19 @@ body::after {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---- Light Mode Overrides ---- */
+
+[data-theme="light"] body::before,
+[data-theme="light"] body::after {
+  display: none;
+}
+
+[data-theme="light"] .glow:hover {
+  text-shadow: none;
+}
+
+[data-theme="light"] ::selection {
+  background: rgba(22, 163, 74, 0.15);
+  color: var(--green);
+}

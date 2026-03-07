@@ -6,6 +6,8 @@
 
 | completed | structured-json-logs_20260307 | Standardize Backend Logs into Structured JSON | 2026-03-07 | 2026-03-07 |
 
+| planned | light-mode-toggle_20260307 | Add Light Mode UI Support with Dark/Light Toggle | feature | frontend | 2026-03-07 |
+
 <!-- Tracks registered by /conductor:new-track -->
 
 ## Archived Tracks

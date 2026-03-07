@@ -1199,6 +1199,93 @@ select.config-input {
   flex-shrink: 0;
 }
 
+/* ---- Light Mode Overrides ---- */
+
+[data-theme="light"] .sidebar {
+  box-shadow: 1px 0 8px rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .status-indicator.connected {
+  box-shadow: 0 0 4px rgba(22, 163, 74, 0.4);
+}
+
+[data-theme="light"] .status-indicator.disconnected {
+  box-shadow: none;
+}
+
+@media (prefers-color-scheme: light) {
+  [data-theme="light"] .status-indicator.connected {
+    animation: statusPulseLight 2s ease-in-out infinite;
+  }
+}
+
+@keyframes statusPulseLight {
+  0%, 100% { box-shadow: 0 0 4px rgba(22, 163, 74, 0.3); }
+  50% { box-shadow: 0 0 8px rgba(22, 163, 74, 0.5); }
+}
+
+[data-theme="light"] .config-search:focus,
+[data-theme="light"] .config-input:focus {
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.10);
+}
+
+[data-theme="light"] .btn-save:hover {
+  background: #15803d;
+}
+
+[data-theme="light"] .auth-overlay::before {
+  background: radial-gradient(ellipse 800px 600px at 50% 40%, rgba(22, 163, 74, 0.06) 0%, transparent 70%);
+}
+
+[data-theme="light"] .auth-card {
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.12), var(--glow-sm);
+}
+
+[data-theme="light"] .auth-input:focus {
+  box-shadow: 0 0 0 2px rgba(22, 163, 74, 0.10), var(--glow-sm);
+}
+
+[data-theme="light"] .auth-submit:hover {
+  background: #15803d;
+}
+
+[data-theme="light"] .device-code-link:hover {
+  box-shadow: 0 0 4px rgba(37, 99, 235, 0.15);
+}
+
+[data-theme="light"] .toast {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .modal-overlay {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="light"] .modal-box {
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.15), var(--glow-sm);
+}
+
+[data-theme="light"] .modal-actions button.modal-confirm:hover {
+  background: #15803d;
+}
+
+[data-theme="light"] .card:hover {
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="light"] .mcp-status-connected::before {
+  box-shadow: 0 0 4px rgba(22, 163, 74, 0.4);
+}
+
+[data-theme="light"] .sidebar-backdrop {
+  background: rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--bg-raised) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+}
+
 /* ---- Responsive ---- */
 
 @media (max-width: 900px) {

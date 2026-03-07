@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useSession } from './SessionGate'
 import { authHeaders } from '../lib/auth'
+import { ThemeToggle } from './ThemeToggle'
 
 interface SidebarProps {
   open?: boolean
@@ -63,6 +64,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </div>
       </div>
       <div className="sidebar-footer-actions">
+        <ThemeToggle />
         <button className="btn-logout" onClick={handleLogout} title="Sign out">
           $ logout
         </button>

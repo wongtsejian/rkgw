@@ -3,6 +3,7 @@ import { Layout } from './components/Layout'
 import { SessionGate } from './components/SessionGate'
 import { AdminGuard } from './components/AdminGuard'
 import { ToastProvider } from './components/Toast'
+import { ThemeProvider } from './lib/theme'
 import { Config } from './pages/Config'
 import { Login } from './pages/Login'
 import { Profile } from './pages/Profile'
@@ -13,6 +14,7 @@ import { McpClients } from './pages/McpClients'
 
 export default function App() {
   return (
+    <ThemeProvider>
     <ToastProvider>
       <BrowserRouter basename="/_ui">
         <Routes>
@@ -29,5 +31,6 @@ export default function App() {
         </Routes>
       </BrowserRouter>
     </ToastProvider>
+    </ThemeProvider>
   )
 }
