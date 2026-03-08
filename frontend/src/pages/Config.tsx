@@ -77,8 +77,6 @@ const CONFIG_GROUPS: { title: string; icon: string; fields: ConfigField[] }[] = 
     fields: [
       { key: 'truncation_recovery', label: 'Truncation Recovery', type: 'checkbox' },
       { key: 'guardrails_enabled', label: 'Guardrails', type: 'checkbox' },
-      { key: 'tls_cert_path', label: 'TLS Cert Path', type: 'text', restart: true },
-      { key: 'tls_key_path', label: 'TLS Key Path', type: 'text', restart: true },
     ],
   },
   {

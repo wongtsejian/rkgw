@@ -195,7 +195,7 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
             }
             Ok(())
         }
-        "oauth_start_url" | "oauth_sso_region" | "tls_cert_path" | "tls_key_path" => {
+        "oauth_start_url" | "oauth_sso_region" => {
             value
                 .as_str()
                 .ok_or_else(|| format!("{} must be a string", key))?;
