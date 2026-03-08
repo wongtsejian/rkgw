@@ -1548,6 +1548,31 @@ select.config-input {
   color: var(--text-tertiary);
 }
 
+/* ---- Copilot Setup ---- */
+
+.copilot-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+}
+
+.copilot-username {
+  color: var(--green);
+  font-weight: 500;
+}
+
+.copilot-plan {
+  font-size: 0.6rem;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--blue-dim);
+  color: var(--blue);
+  text-transform: lowercase;
+}
+
 /* ---- Relay Modal ---- */
 
 .relay-modal {

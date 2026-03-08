@@ -1,0 +1,615 @@
+/// CopilotProvider — direct calls to GitHub Copilot's OpenAI-compatible API.
+///
+/// Copilot uses per-user base URLs (determined by copilot_plan) and requires
+/// VS Code-mimicking headers on every request. Handles both OpenAI-format
+/// (pass-through) and Anthropic-format (converted to OpenAI) inputs.
+use std::pin::Pin;
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use futures::stream::{Stream, StreamExt};
+use serde_json::{json, Value};
+use uuid::Uuid;
+
+use crate::error::ApiError;
+use crate::models::anthropic::AnthropicMessagesRequest;
+use crate::models::openai::ChatCompletionRequest;
+use crate::providers::traits::Provider;
+use crate::providers::types::{ProviderContext, ProviderId, ProviderResponse, ProviderStreamItem};
+
+pub struct CopilotProvider {
+    client: reqwest::Client,
+}
+
+impl CopilotProvider {
+    pub fn new() -> Self {
+        Self {
+            client: reqwest::Client::new(),
+        }
+    }
+
+    /// Copilot completions URL: `{base_url}/chat/completions` (no /v1/ prefix).
+    fn completions_url(ctx: &ProviderContext<'_>) -> String {
+        let base = ctx
+            .credentials
+            .base_url
+            .as_deref()
+            .unwrap_or("https://api.githubcopilot.com");
+        format!("{}/chat/completions", base)
+    }
+
+    /// Strip version suffixes from Claude model names for Copilot compatibility.
+    fn normalize_model_name(model: &str) -> String {
+        if model.starts_with("claude-sonnet-4-") {
+            return "claude-sonnet-4".to_string();
+        }
+        if model.starts_with("claude-opus-4-") {
+            return "claude-opus-4".to_string();
+        }
+        model.to_string()
+    }
+
+    /// Detect if any message contains image_url content parts.
+    fn has_vision_content(body: &Value) -> bool {
+        if let Some(messages) = body.get("messages").and_then(|m| m.as_array()) {
+            for msg in messages {
+                if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
+                    for part in content {
+                        if part.get("type").and_then(|t| t.as_str()) == Some("image_url") {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// Convert Anthropic messages format to OpenAI chat completions format.
+    /// Reuses the same logic as OpenAIProvider.
+    fn anthropic_to_openai_body(req: &AnthropicMessagesRequest) -> Value {
+        let mut messages: Vec<Value> = Vec::new();
+
+        if let Some(system) = &req.system {
+            let system_text = system
+                .as_str()
+                .map(String::from)
+                .or_else(|| {
+                    system.as_array().map(|blocks| {
+                        blocks
+                            .iter()
+                            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("\n")
+                    })
+                })
+                .unwrap_or_default();
+            if !system_text.is_empty() {
+                messages.push(json!({ "role": "system", "content": system_text }));
+            }
+        }
+
+        for msg in &req.messages {
+            let content = msg
+                .content
+                .as_str()
+                .map(|s| json!(s))
+                .unwrap_or_else(|| msg.content.clone());
+            messages.push(json!({ "role": msg.role, "content": content }));
+        }
+
+        let mut body = json!({
+            "model": req.model,
+            "messages": messages,
+            "stream": false,
+        });
+
+        if req.max_tokens > 0 {
+            body["max_tokens"] = json!(req.max_tokens);
+        }
+        if let Some(temp) = req.temperature {
+            body["temperature"] = json!(temp);
+        }
+
+        body
+    }
+
+    /// Build and send a request with Copilot-specific headers.
+    async fn send_request(
+        &self,
+        ctx: &ProviderContext<'_>,
+        mut body: Value,
+        stream: bool,
+    ) -> Result<reqwest::Response, ApiError> {
+        let url = Self::completions_url(ctx);
+        let model = Self::normalize_model_name(ctx.model);
+        body["model"] = json!(model);
+        body["stream"] = json!(stream);
+
+        let has_vision = Self::has_vision_content(&body);
+
+        let mut builder = self
+            .client
+            .post(&url)
+            .header(
+                "Authorization",
+                format!("Bearer {}", ctx.credentials.access_token),
+            )
+            .header("content-type", "application/json")
+            .header("copilot-integration-id", "vscode-chat")
+            .header("editor-version", "vscode/1.97.2")
+            .header("editor-plugin-version", "copilot-chat/0.26.7")
+            .header("user-agent", "GitHubCopilotChat/0.26.7")
+            .header("openai-intent", "conversation-panel")
+            .header("x-github-api-version", "2025-04-01")
+            .header("x-request-id", Uuid::new_v4().to_string());
+
+        if has_vision {
+            builder = builder.header("copilot-vision-request", "true");
+        }
+
+        let response =
+            builder.json(&body).send().await.map_err(|e| {
+                ApiError::Internal(anyhow::anyhow!("Copilot request failed: {}", e))
+            })?;
+
+        let status = response.status().as_u16();
+        if !response.status().is_success() {
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(ApiError::ProviderApiError {
+                provider: "copilot".to_string(),
+                status,
+                message: error_text,
+            });
+        }
+
+        Ok(response)
+    }
+}
+
+impl Default for CopilotProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl Provider for CopilotProvider {
+    fn id(&self) -> ProviderId {
+        ProviderId::Copilot
+    }
+
+    async fn execute_openai(
+        &self,
+        ctx: &ProviderContext<'_>,
+        req: &ChatCompletionRequest,
+    ) -> Result<ProviderResponse, ApiError> {
+        let body = serde_json::to_value(req)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Serialization failed: {}", e)))?;
+        let response = self.send_request(ctx, body, false).await?;
+        let status = response.status().as_u16();
+        let body: Value = response.json().await.map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!("Failed to parse Copilot response: {}", e))
+        })?;
+        Ok(ProviderResponse { status, body })
+    }
+
+    async fn stream_openai(
+        &self,
+        ctx: &ProviderContext<'_>,
+        req: &ChatCompletionRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderStreamItem> + Send>>, ApiError> {
+        let body = serde_json::to_value(req)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Serialization failed: {}", e)))?;
+        let response = self.send_request(ctx, body, true).await?;
+        // Pass raw SSE bytes from Copilot directly to the client (same as OpenAI)
+        let stream = response.bytes_stream().map(|chunk| {
+            chunk.map_err(|e| ApiError::Internal(anyhow::anyhow!("Stream error: {}", e)))
+        });
+        Ok(Box::pin(stream))
+    }
+
+    async fn execute_anthropic(
+        &self,
+        ctx: &ProviderContext<'_>,
+        req: &AnthropicMessagesRequest,
+    ) -> Result<ProviderResponse, ApiError> {
+        let body = Self::anthropic_to_openai_body(req);
+        let response = self.send_request(ctx, body, false).await?;
+        let status = response.status().as_u16();
+        let body: Value = response.json().await.map_err(|e| {
+            ApiError::Internal(anyhow::anyhow!("Failed to parse Copilot response: {}", e))
+        })?;
+        Ok(ProviderResponse { status, body })
+    }
+
+    async fn stream_anthropic(
+        &self,
+        ctx: &ProviderContext<'_>,
+        req: &AnthropicMessagesRequest,
+    ) -> Result<Pin<Box<dyn Stream<Item = ProviderStreamItem> + Send>>, ApiError> {
+        let body = Self::anthropic_to_openai_body(req);
+        let response = self.send_request(ctx, body, true).await?;
+        let byte_stream = response.bytes_stream();
+        let sse = crate::streaming::sse::parse_sse_stream(byte_stream).map(|item| match item {
+            Ok(v) => {
+                let line = format!("data: {}\n\n", v);
+                Ok(Bytes::from(line))
+            }
+            Err(e) => Err(e),
+        });
+        Ok(Box::pin(sse))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::anthropic::{AnthropicMessage, AnthropicMessagesRequest};
+    use crate::providers::types::ProviderCredentials;
+
+    #[test]
+    fn test_copilot_provider_id() {
+        assert_eq!(CopilotProvider::new().id(), ProviderId::Copilot);
+    }
+
+    #[test]
+    fn test_completions_url_from_base_url() {
+        let creds = ProviderCredentials {
+            provider: ProviderId::Copilot,
+            access_token: "tok".to_string(),
+            base_url: Some("https://api.githubcopilot.com".to_string()),
+        };
+        let model = "gpt-4o".to_string();
+        let ctx = ProviderContext {
+            credentials: &creds,
+            model: &model,
+        };
+        assert_eq!(
+            CopilotProvider::completions_url(&ctx),
+            "https://api.githubcopilot.com/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_completions_url_business() {
+        let creds = ProviderCredentials {
+            provider: ProviderId::Copilot,
+            access_token: "tok".to_string(),
+            base_url: Some("https://api.business.githubcopilot.com".to_string()),
+        };
+        let model = "gpt-4o".to_string();
+        let ctx = ProviderContext {
+            credentials: &creds,
+            model: &model,
+        };
+        assert_eq!(
+            CopilotProvider::completions_url(&ctx),
+            "https://api.business.githubcopilot.com/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_completions_url_default_when_none() {
+        let creds = ProviderCredentials {
+            provider: ProviderId::Copilot,
+            access_token: "tok".to_string(),
+            base_url: None,
+        };
+        let model = "gpt-4o".to_string();
+        let ctx = ProviderContext {
+            credentials: &creds,
+            model: &model,
+        };
+        assert_eq!(
+            CopilotProvider::completions_url(&ctx),
+            "https://api.githubcopilot.com/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_normalize_model_name_strips_claude_suffix() {
+        assert_eq!(
+            CopilotProvider::normalize_model_name("claude-sonnet-4-20250514"),
+            "claude-sonnet-4"
+        );
+        assert_eq!(
+            CopilotProvider::normalize_model_name("claude-opus-4-20250514"),
+            "claude-opus-4"
+        );
+    }
+
+    #[test]
+    fn test_normalize_model_name_passthrough() {
+        assert_eq!(CopilotProvider::normalize_model_name("gpt-4o"), "gpt-4o");
+        assert_eq!(
+            CopilotProvider::normalize_model_name("claude-sonnet-4"),
+            "claude-sonnet-4"
+        );
+        assert_eq!(CopilotProvider::normalize_model_name("o4-mini"), "o4-mini");
+    }
+
+    #[test]
+    fn test_has_vision_content_true() {
+        let body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "What is this?" },
+                    { "type": "image_url", "image_url": { "url": "data:image/png;base64,..." } }
+                ]
+            }]
+        });
+        assert!(CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_has_vision_content_false_text_only() {
+        let body = json!({
+            "messages": [{
+                "role": "user",
+                "content": "Hello"
+            }]
+        });
+        assert!(!CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_has_vision_content_false_no_image_url() {
+        let body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    { "type": "text", "text": "Hello" }
+                ]
+            }]
+        });
+        assert!(!CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_basic() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hello"),
+            }],
+            max_tokens: 1000,
+            system: None,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        assert_eq!(body["model"], "claude-sonnet-4");
+        assert_eq!(body["max_tokens"], 1000);
+        assert_eq!(body["messages"][0]["role"], "user");
+        assert_eq!(body["messages"][0]["content"], "Hello");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_with_system() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hi"),
+            }],
+            max_tokens: 100,
+            system: Some(json!("Be helpful")),
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "Be helpful");
+        assert_eq!(body["messages"][1]["role"], "user");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_with_system_blocks() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hi"),
+            }],
+            max_tokens: 100,
+            system: Some(json!([
+                { "type": "text", "text": "First" },
+                { "type": "text", "text": "Second" }
+            ])),
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        assert_eq!(body["messages"][0]["role"], "system");
+        assert_eq!(body["messages"][0]["content"], "First\nSecond");
+    }
+
+    #[test]
+    fn test_has_vision_content_empty_messages() {
+        let body = json!({ "messages": [] });
+        assert!(!CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_has_vision_content_no_messages_key() {
+        let body = json!({ "model": "gpt-4o" });
+        assert!(!CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_has_vision_content_multiple_messages_one_with_image() {
+        let body = json!({
+            "messages": [
+                { "role": "user", "content": "Hello" },
+                { "role": "user", "content": [
+                    { "type": "image_url", "image_url": { "url": "data:..." } }
+                ]}
+            ]
+        });
+        assert!(CopilotProvider::has_vision_content(&body));
+    }
+
+    #[test]
+    fn test_normalize_model_name_claude_haiku_passthrough() {
+        // Only claude-sonnet-4- and claude-opus-4- get stripped
+        assert_eq!(
+            CopilotProvider::normalize_model_name("claude-3-5-haiku-20241022"),
+            "claude-3-5-haiku-20241022"
+        );
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_zero_max_tokens_omitted() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hi"),
+            }],
+            max_tokens: 0,
+            system: None,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        assert!(body.get("max_tokens").is_none());
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_with_temperature() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hi"),
+            }],
+            max_tokens: 100,
+            system: None,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: Some(0.7),
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        let temp = body["temperature"].as_f64().unwrap();
+        assert!((temp - 0.7).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_empty_system_string_omitted() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![AnthropicMessage {
+                role: "user".to_string(),
+                content: json!("Hi"),
+            }],
+            max_tokens: 100,
+            system: Some(json!("")),
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        // Empty system string should not produce a system message
+        assert_eq!(body["messages"][0]["role"], "user");
+    }
+
+    #[test]
+    fn test_anthropic_to_openai_body_multi_turn() {
+        let req = AnthropicMessagesRequest {
+            model: "claude-sonnet-4".to_string(),
+            messages: vec![
+                AnthropicMessage {
+                    role: "user".to_string(),
+                    content: json!("Hello"),
+                },
+                AnthropicMessage {
+                    role: "assistant".to_string(),
+                    content: json!("Hi there!"),
+                },
+                AnthropicMessage {
+                    role: "user".to_string(),
+                    content: json!("How are you?"),
+                },
+            ],
+            max_tokens: 100,
+            system: None,
+            stream: false,
+            tools: None,
+            tool_choice: None,
+            temperature: None,
+            top_p: None,
+            top_k: None,
+            stop_sequences: None,
+            metadata: None,
+        };
+        let body = CopilotProvider::anthropic_to_openai_body(&req);
+        let msgs = body["messages"].as_array().unwrap();
+        assert_eq!(msgs.len(), 3);
+        assert_eq!(msgs[1]["role"], "assistant");
+        assert_eq!(msgs[2]["content"], "How are you?");
+    }
+
+    #[test]
+    fn test_completions_url_enterprise() {
+        let creds = ProviderCredentials {
+            provider: ProviderId::Copilot,
+            access_token: "tok".to_string(),
+            base_url: Some("https://api.enterprise.githubcopilot.com".to_string()),
+        };
+        let model = "gpt-4o".to_string();
+        let ctx = ProviderContext {
+            credentials: &creds,
+            model: &model,
+        };
+        assert_eq!(
+            CopilotProvider::completions_url(&ctx),
+            "https://api.enterprise.githubcopilot.com/chat/completions"
+        );
+    }
+
+    #[test]
+    fn test_copilot_provider_default() {
+        let provider = CopilotProvider::default();
+        assert_eq!(provider.id(), ProviderId::Copilot);
+    }
+}

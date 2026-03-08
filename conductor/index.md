@@ -14,8 +14,14 @@ Navigation hub for project context.
 
 ## Active Tracks
 
-<!-- Auto-populated by /conductor:new-track -->
+- [Copilot Provider Support](./tracks/copilot-provider-support_20260308/) — In progress (26/35 tasks)
 
 ## Archived Tracks
 
-- [Datadog APM Integration](./tracks/_archive/datadog-apm_20260304/index.md) — Completed 2026-03-05
+- [Light Mode Toggle](./tracks/_archive/light-mode-toggle_20260307/) — Completed 2026-03-07
+- [Centralize E2E Tests](./tracks/_archive/centralize-e2e-tests_20260307/) — Completed 2026-03-07
+- [Provider OAuth Relay](./tracks/_archive/provider-oauth-relay_20260307/) — Completed 2026-03-07
+- [Multi-Provider Support](./tracks/_archive/multi-provider-support_20260307/) — Completed 2026-03-07
+- [Structured JSON Logs](./tracks/_archive/structured-json-logs_20260307/) — Completed 2026-03-07
+- [Frontend Backend Revamp](./tracks/_archive/frontend-backend-revamp_20260306/) — Completed 2026-03-07
+- [Datadog APM Integration](./tracks/_archive/datadog-apm_20260304/) — Completed 2026-03-05

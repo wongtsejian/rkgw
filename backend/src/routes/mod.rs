@@ -29,6 +29,7 @@ use crate::middleware::DEBUG_LOGGER;
 use crate::models::anthropic::AnthropicMessagesRequest;
 use crate::models::openai::{ChatCompletionRequest, ModelList, OpenAIModel};
 use crate::providers::anthropic::AnthropicProvider;
+use crate::providers::copilot::CopilotProvider;
 use crate::providers::gemini::GeminiProvider;
 use crate::providers::openai::OpenAIProvider;
 use crate::providers::registry::ProviderRegistry;
@@ -105,11 +106,16 @@ pub struct AppState {
     pub openai_provider: Arc<OpenAIProvider>,
     /// Direct Gemini API provider
     pub gemini_provider: Arc<GeminiProvider>,
+    /// Direct Copilot API provider
+    pub copilot_provider: Arc<CopilotProvider>,
     // Provider OAuth relay
     /// Pending provider OAuth relay states (separate from Google SSO oauth_pending)
     pub provider_oauth_pending: Arc<DashMap<String, ProviderOAuthPendingState>>,
     /// Token exchanger for provider OAuth (mockable for tests)
     pub token_exchanger: Arc<dyn TokenExchanger>,
+    // Copilot
+    /// user_id → (copilot_token, base_url, cached_at)
+    pub copilot_token_cache: Arc<DashMap<Uuid, (String, String, std::time::Instant)>>,
 }
 
 impl AppState {
@@ -432,6 +438,7 @@ async fn handle_direct_openai(
             ProviderId::OpenAI => state.openai_provider.stream_openai(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.stream_openai(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.stream_openai(&ctx, req).await?,
+            ProviderId::Copilot => state.copilot_provider.stream_openai(&ctx, req).await?,
             ProviderId::Kiro => unreachable!(),
         };
         let byte_stream = stream.map(|r| r.map_err(|e| std::io::Error::other(e.to_string())));
@@ -447,10 +454,11 @@ async fn handle_direct_openai(
             ProviderId::OpenAI => state.openai_provider.execute_openai(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.execute_openai(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.execute_openai(&ctx, req).await?,
+            ProviderId::Copilot => state.copilot_provider.execute_openai(&ctx, req).await?,
             ProviderId::Kiro => unreachable!(),
         };
         let body = match provider_id {
-            ProviderId::OpenAI => resp.body,
+            ProviderId::OpenAI | ProviderId::Copilot => resp.body,
             ProviderId::Anthropic => anthropic_response_to_openai(&req.model, &resp.body),
             ProviderId::Gemini => serde_json::to_value(
                 crate::converters::gemini_to_openai::gemini_to_openai(&req.model, &resp.body),
@@ -487,6 +495,7 @@ async fn handle_direct_anthropic(
             ProviderId::OpenAI => state.openai_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.stream_anthropic(&ctx, req).await?,
+            ProviderId::Copilot => state.copilot_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Kiro => unreachable!(),
         };
         let byte_stream = stream.map(|r| r.map_err(|e| std::io::Error::other(e.to_string())));
@@ -507,11 +516,14 @@ async fn handle_direct_anthropic(
                     .await?
             }
             ProviderId::Gemini => state.gemini_provider.execute_anthropic(&ctx, req).await?,
+            ProviderId::Copilot => state.copilot_provider.execute_anthropic(&ctx, req).await?,
             ProviderId::Kiro => unreachable!(),
         };
         let body = match provider_id {
             ProviderId::Anthropic => resp.body,
-            ProviderId::OpenAI => openai_response_to_anthropic(&req.model, &resp.body),
+            ProviderId::OpenAI | ProviderId::Copilot => {
+                openai_response_to_anthropic(&req.model, &resp.body)
+            }
             ProviderId::Gemini => serde_json::to_value(
                 crate::converters::gemini_to_anthropic::gemini_to_anthropic(&req.model, &resp.body),
             )
@@ -1170,8 +1182,10 @@ mod tests {
             anthropic_provider: Arc::new(AnthropicProvider::new()),
             openai_provider: Arc::new(OpenAIProvider::new()),
             gemini_provider: Arc::new(GeminiProvider::new()),
+            copilot_provider: Arc::new(CopilotProvider::new()),
             provider_oauth_pending: Arc::new(DashMap::new()),
             token_exchanger: Arc::new(crate::web_ui::provider_oauth::HttpTokenExchanger::new()),
+            copilot_token_cache: Arc::new(DashMap::new()),
         }
     }
 

@@ -7,6 +7,19 @@ use uuid::Uuid;
 
 use crate::config::{Config, DebugMode};
 
+/// A row from the `user_copilot_tokens` table.
+#[derive(Debug, Clone)]
+pub struct CopilotTokenRow {
+    pub user_id: Uuid,
+    pub github_token: String,
+    pub github_username: Option<String>,
+    pub copilot_token: Option<String>,
+    pub copilot_plan: Option<String>,
+    pub base_url: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub refresh_in: Option<i64>,
+}
+
 /// Tuple representing a user row: (id, email, name, picture_url, role, created_at).
 pub type UserRow = (Uuid, String, String, Option<String>, String, DateTime<Utc>);
 
@@ -153,6 +166,17 @@ impl ConfigDb {
 
         if max_version.unwrap_or(1) < 8 {
             self.migrate_to_v8().await?;
+        }
+
+        // Re-read max version after v8 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 9 {
+            self.migrate_to_v9().await?;
         }
 
         Ok(())
@@ -1518,6 +1542,271 @@ impl ConfigDb {
         Ok(())
     }
 
+    /// Version 9 migration: Copilot tokens and provider priority tables.
+    async fn migrate_to_v9(&self) -> Result<()> {
+        tracing::info!(
+            "Running database migration to version 9 (copilot tokens + provider priority)..."
+        );
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin v9 migration transaction")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS user_copilot_tokens (
+                id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                github_token    TEXT NOT NULL,
+                github_username TEXT,
+                copilot_token   TEXT,
+                copilot_plan    TEXT,
+                base_url        TEXT,
+                expires_at      TIMESTAMPTZ,
+                refresh_in      BIGINT,
+                created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                UNIQUE(user_id)
+            )",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create user_copilot_tokens table")?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS user_provider_priority (
+                user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                provider_id TEXT NOT NULL,
+                priority    INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (user_id, provider_id)
+            )",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create user_provider_priority table")?;
+
+        // Extend model_routes CHECK constraint to include 'copilot'
+        sqlx::query(
+            "ALTER TABLE model_routes
+             DROP CONSTRAINT IF EXISTS model_routes_provider_id_check",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to drop old model_routes CHECK constraint")?;
+
+        sqlx::query(
+            "ALTER TABLE model_routes
+             ADD CONSTRAINT model_routes_provider_id_check
+             CHECK (provider_id IN ('kiro', 'anthropic', 'openai', 'gemini', 'copilot'))",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add updated model_routes CHECK constraint")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(9_i32)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to record schema version 9")?;
+
+        tx.commit().await.context("Failed to commit v9 migration")?;
+
+        tracing::info!("Database migration to version 9 complete");
+        Ok(())
+    }
+
+    // ── Copilot Tokens ────────────────────────────────────────────
+
+    /// Upsert a user's Copilot tokens (GitHub OAuth + Copilot bearer).
+    #[allow(dead_code)]
+    pub async fn upsert_copilot_tokens(
+        &self,
+        user_id: Uuid,
+        github_token: &str,
+        github_username: Option<&str>,
+        copilot_token: Option<&str>,
+        copilot_plan: Option<&str>,
+        base_url: Option<&str>,
+        expires_at: Option<DateTime<Utc>>,
+        refresh_in: Option<i64>,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO user_copilot_tokens
+                (user_id, github_token, github_username, copilot_token, copilot_plan, base_url, expires_at, refresh_in, updated_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+             ON CONFLICT (user_id) DO UPDATE SET
+               github_token    = EXCLUDED.github_token,
+               github_username = EXCLUDED.github_username,
+               copilot_token   = EXCLUDED.copilot_token,
+               copilot_plan    = EXCLUDED.copilot_plan,
+               base_url        = EXCLUDED.base_url,
+               expires_at      = EXCLUDED.expires_at,
+               refresh_in      = EXCLUDED.refresh_in,
+               updated_at      = NOW()",
+        )
+        .bind(user_id)
+        .bind(github_token)
+        .bind(github_username)
+        .bind(copilot_token)
+        .bind(copilot_plan)
+        .bind(base_url)
+        .bind(expires_at)
+        .bind(refresh_in)
+        .execute(&self.pool)
+        .await
+        .context("Failed to upsert copilot tokens")?;
+
+        Ok(())
+    }
+
+    /// Get a user's Copilot tokens.
+    #[allow(dead_code)]
+    pub async fn get_copilot_tokens(&self, user_id: Uuid) -> Result<Option<CopilotTokenRow>> {
+        let row: Option<(String, Option<String>, Option<String>, Option<String>, Option<String>, Option<DateTime<Utc>>, Option<i64>)> = sqlx::query_as(
+            "SELECT github_token, github_username, copilot_token, copilot_plan, base_url, expires_at, refresh_in
+             FROM user_copilot_tokens
+             WHERE user_id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get copilot tokens")?;
+
+        Ok(row.map(
+            |(
+                github_token,
+                github_username,
+                copilot_token,
+                copilot_plan,
+                base_url,
+                expires_at,
+                refresh_in,
+            )| {
+                CopilotTokenRow {
+                    user_id,
+                    github_token,
+                    github_username,
+                    copilot_token,
+                    copilot_plan,
+                    base_url,
+                    expires_at,
+                    refresh_in,
+                }
+            },
+        ))
+    }
+
+    /// Delete a user's Copilot tokens.
+    #[allow(dead_code)]
+    pub async fn delete_copilot_tokens(&self, user_id: Uuid) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM user_copilot_tokens WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete copilot tokens")?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Check if a user has Copilot tokens stored.
+    #[allow(dead_code)]
+    pub async fn has_copilot_token(&self, user_id: Uuid) -> Result<bool> {
+        let count: Option<i64> =
+            sqlx::query_scalar("SELECT COUNT(*) FROM user_copilot_tokens WHERE user_id = $1")
+                .bind(user_id)
+                .fetch_one(&self.pool)
+                .await
+                .context("Failed to check copilot token existence")?;
+
+        Ok(count.unwrap_or(0) > 0)
+    }
+
+    /// Get all Copilot tokens expiring within 5 minutes (for background refresh).
+    #[allow(dead_code)]
+    pub async fn get_expiring_copilot_tokens(&self) -> Result<Vec<CopilotTokenRow>> {
+        let rows: Vec<(Uuid, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<DateTime<Utc>>, Option<i64>)> = sqlx::query_as(
+            "SELECT user_id, github_token, github_username, copilot_token, copilot_plan, base_url, expires_at, refresh_in
+             FROM user_copilot_tokens
+             WHERE copilot_token IS NOT NULL
+               AND expires_at IS NOT NULL
+               AND expires_at < NOW() + INTERVAL '5 minutes'",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to get expiring copilot tokens")?;
+
+        Ok(rows
+            .into_iter()
+            .map(
+                |(
+                    user_id,
+                    github_token,
+                    github_username,
+                    copilot_token,
+                    copilot_plan,
+                    base_url,
+                    expires_at,
+                    refresh_in,
+                )| {
+                    CopilotTokenRow {
+                        user_id,
+                        github_token,
+                        github_username,
+                        copilot_token,
+                        copilot_plan,
+                        base_url,
+                        expires_at,
+                        refresh_in,
+                    }
+                },
+            )
+            .collect())
+    }
+
+    // ── Provider Priority ─────────────────────────────────────────
+
+    /// Get a user's provider priority list, ordered by priority (ascending).
+    #[allow(dead_code)]
+    pub async fn get_user_provider_priority(&self, user_id: Uuid) -> Result<Vec<(String, i32)>> {
+        let rows: Vec<(String, i32)> = sqlx::query_as(
+            "SELECT provider_id, priority
+             FROM user_provider_priority
+             WHERE user_id = $1
+             ORDER BY priority ASC",
+        )
+        .bind(user_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to get user provider priority")?;
+
+        Ok(rows)
+    }
+
+    /// Upsert a user's priority for a specific provider.
+    #[allow(dead_code)]
+    pub async fn upsert_user_provider_priority(
+        &self,
+        user_id: Uuid,
+        provider_id: &str,
+        priority: i32,
+    ) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO user_provider_priority (user_id, provider_id, priority)
+             VALUES ($1, $2, $3)
+             ON CONFLICT (user_id, provider_id) DO UPDATE SET
+               priority = EXCLUDED.priority",
+        )
+        .bind(user_id)
+        .bind(provider_id)
+        .bind(priority)
+        .execute(&self.pool)
+        .await
+        .context("Failed to upsert user provider priority")?;
+
+        Ok(())
+    }
+
     // ── Provider Keys ─────────────────────────────────────────────
 
     /// Get a user's stored API key for a specific provider.
@@ -1752,6 +2041,14 @@ mod tests {
             .await
             .ok();
         sqlx::query("DELETE FROM user_provider_tokens")
+            .execute(&db.pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM user_copilot_tokens")
+            .execute(&db.pool)
+            .await
+            .ok();
+        sqlx::query("DELETE FROM user_provider_priority")
             .execute(&db.pool)
             .await
             .ok();

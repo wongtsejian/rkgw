@@ -328,8 +328,10 @@ mod tests {
             anthropic_provider: Arc::new(crate::providers::anthropic::AnthropicProvider::new()),
             openai_provider: Arc::new(crate::providers::openai::OpenAIProvider::new()),
             gemini_provider: Arc::new(crate::providers::gemini::GeminiProvider::new()),
+            copilot_provider: Arc::new(crate::providers::copilot::CopilotProvider::new()),
             provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
             token_exchanger: Arc::new(crate::web_ui::provider_oauth::HttpTokenExchanger::new()),
+            copilot_token_cache: Arc::new(dashmap::DashMap::new()),
         }
     }
 

@@ -49,7 +49,7 @@ export default defineConfig({
     {
       name: 'ui-authenticated',
       testDir: './specs/ui',
-      testMatch: ['dashboard.spec.ts', 'profile.spec.ts', 'navigation.spec.ts', 'provider-oauth.spec.ts'],
+      testMatch: ['dashboard.spec.ts', 'profile.spec.ts', 'navigation.spec.ts', 'provider-oauth.spec.ts', 'copilot-setup.spec.ts'],
       use: {
         baseURL: BASE_UI_URL,
         ignoreHTTPSErrors: true,

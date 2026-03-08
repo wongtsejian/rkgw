@@ -1,8 +1,10 @@
 pub mod api_keys;
 pub mod config_api;
 pub mod config_db;
+pub mod copilot_auth;
 pub mod google_auth;
 pub mod provider_oauth;
+pub mod provider_priority;
 pub mod routes;
 pub mod session;
 pub mod user_kiro;
@@ -72,6 +74,10 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .merge(api_keys::api_key_routes())
         // Multi-provider: per-user provider OAuth management
         .merge(provider_oauth::provider_oauth_routes())
+        // Copilot: GitHub OAuth connect/callback/status/disconnect
+        .merge(copilot_auth::copilot_routes())
+        // Provider priority management
+        .merge(provider_priority::provider_priority_routes())
         // Session + CSRF middleware stack
         .layer(axum::middleware::from_fn(google_auth::csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(

@@ -123,6 +123,16 @@ pub enum ApiError {
     #[allow(dead_code)]
     ProviderNotConfigured(String),
 
+    /// Copilot authentication failed (GitHub OAuth or token exchange)
+    #[error("Copilot auth failed: {0}")]
+    #[allow(dead_code)]
+    CopilotAuthError(String),
+
+    /// Copilot bearer token has expired and needs re-authentication
+    #[error("Copilot token expired")]
+    #[allow(dead_code)]
+    CopilotTokenExpired,
+
     /// Internal server error
     #[error("Internal error: {0}")]
     Internal(#[from] anyhow::Error),
@@ -228,6 +238,12 @@ impl IntoResponse for ApiError {
                     "No API key configured for provider '{}'. Connect it at /_ui/profile",
                     provider
                 ),
+            ),
+            ApiError::CopilotAuthError(msg) => (StatusCode::BAD_GATEWAY, "copilot_auth_error", msg),
+            ApiError::CopilotTokenExpired => (
+                StatusCode::FORBIDDEN,
+                "copilot_token_expired",
+                "Copilot token expired. Re-connect at /_ui/profile".to_string(),
             ),
             ApiError::Internal(err) => {
                 // Log internal errors

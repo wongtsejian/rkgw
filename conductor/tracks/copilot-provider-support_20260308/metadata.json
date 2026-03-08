@@ -1,0 +1,21 @@
+{
+  "id": "copilot-provider-support_20260308",
+  "title": "Add GitHub Copilot Provider Support",
+  "type": "feature",
+  "status": "completed",
+  "preset": "fullstack",
+  "services": ["backend", "frontend", "infra", "backend-qa", "frontend-qa"],
+  "agents": ["scrum-master", "rust-backend-engineer", "react-frontend-engineer", "backend-qa", "frontend-qa"],
+  "branch": "feat/copilot-provider-support",
+  "created_at": "2026-03-08T09:30:00.000Z",
+  "updated_at": "2026-03-08T10:40:00.000Z",
+  "phases": {
+    "1": { "name": "Backend Foundation", "status": "completed", "tasks_total": 8, "tasks_done": 8 },
+    "2": { "name": "Backend Auth & Token Refresh", "status": "completed", "tasks_total": 7, "tasks_done": 7 },
+    "3": { "name": "Backend Provider & Registry Integration", "status": "completed", "tasks_total": 8, "tasks_done": 8 },
+    "4": { "name": "Infrastructure", "status": "completed", "tasks_total": 2, "tasks_done": 2 },
+    "5": { "name": "Frontend", "status": "completed", "tasks_total": 4, "tasks_done": 4 },
+    "6": { "name": "QA", "status": "completed", "tasks_total": 6, "tasks_done": 6 }
+  },
+  "commits": []
+}

@@ -24,6 +24,8 @@ struct CacheEntry {
     credentials: HashMap<String, ProviderCredentials>,
     /// Per-provider token expiry times.
     expires_at: HashMap<String, DateTime<Utc>>,
+    /// User's provider priority (provider_id -> priority). Lower = preferred.
+    priority: HashMap<String, i32>,
     cached_at: Instant,
 }
 
@@ -196,10 +198,15 @@ impl ProviderRegistry {
 
     /// Resolve provider and credentials for a user + model.
     ///
+    /// When multiple providers can serve the requested model (e.g. both Anthropic
+    /// and Copilot can serve `claude-*`), picks the one with the lowest priority
+    /// number from the user's `user_provider_priority` table. Falls back to the
+    /// native provider when no priority is configured.
+    ///
     /// Returns `(ProviderId::Kiro, None)` when:
     /// - `user_id` is None (proxy-only mode or unauthenticated)
     /// - The model has no recognised direct-provider prefix
-    /// - The user has no stored token for the inferred provider
+    /// - The user has no stored token for any candidate provider
     /// - The DB is unavailable
     pub async fn resolve_provider(
         &self,
@@ -210,18 +217,14 @@ impl ProviderRegistry {
         let Some(uid) = user_id else {
             return (ProviderId::Kiro, None);
         };
-        let Some(target) = Self::provider_for_model(model) else {
+        let Some(native) = Self::provider_for_model(model) else {
             return (ProviderId::Kiro, None);
         };
-        let provider_str = target.as_str();
 
         // Cache hit?
         if let Some(entry) = self.cache.get(&uid) {
             if entry.cached_at.elapsed() < CACHE_TTL {
-                return match entry.credentials.get(provider_str) {
-                    Some(creds) => (target, Some(creds.clone())),
-                    None => (ProviderId::Kiro, None),
-                };
+                return Self::pick_best_provider(&native, &entry.credentials, &entry.priority);
             }
         }
 
@@ -229,20 +232,49 @@ impl ProviderRegistry {
         let Some(db) = db else {
             return (ProviderId::Kiro, None);
         };
-        let (user_creds, user_expires) = Self::load_user_tokens(uid, db).await;
-        let result = match user_creds.get(provider_str) {
-            Some(creds) => (target, Some(creds.clone())),
-            None => (ProviderId::Kiro, None),
-        };
+        let (user_creds, user_expires, user_priority) = Self::load_user_data(uid, db).await;
+        let result = Self::pick_best_provider(&native, &user_creds, &user_priority);
         self.cache.insert(
             uid,
             CacheEntry {
                 credentials: user_creds,
                 expires_at: user_expires,
+                priority: user_priority,
                 cached_at: Instant::now(),
             },
         );
         result
+    }
+
+    /// Pick the best provider from candidates that have credentials.
+    ///
+    /// Candidates are the native provider for the model plus Copilot (which can
+    /// serve any model). The provider with the lowest priority number wins.
+    /// If no priority is set for either, the native provider is preferred.
+    fn pick_best_provider(
+        native: &ProviderId,
+        credentials: &HashMap<String, ProviderCredentials>,
+        priority: &HashMap<String, i32>,
+    ) -> (ProviderId, Option<ProviderCredentials>) {
+        let native_str = native.as_str();
+        let has_native = credentials.contains_key(native_str);
+        let has_copilot = credentials.contains_key("copilot");
+
+        match (has_native, has_copilot) {
+            (false, false) => (ProviderId::Kiro, None),
+            (true, false) => (native.clone(), Some(credentials[native_str].clone())),
+            (false, true) => (ProviderId::Copilot, Some(credentials["copilot"].clone())),
+            (true, true) => {
+                // Both available — use priority (lower number wins)
+                let native_pri = priority.get(native_str).copied().unwrap_or(0);
+                let copilot_pri = priority.get("copilot").copied().unwrap_or(1);
+                if copilot_pri < native_pri {
+                    (ProviderId::Copilot, Some(credentials["copilot"].clone()))
+                } else {
+                    (native.clone(), Some(credentials[native_str].clone()))
+                }
+            }
+        }
     }
 
     /// Invalidate the cache for a user. Call after a provider token is added, removed, or refreshed.
@@ -250,13 +282,14 @@ impl ProviderRegistry {
         self.cache.remove(&user_id);
     }
 
-    /// Load all provider tokens for a user from the `user_provider_tokens` table.
-    async fn load_user_tokens(
+    /// Load all provider tokens and priority for a user from the database.
+    async fn load_user_data(
         user_id: Uuid,
         db: &ConfigDb,
     ) -> (
         HashMap<String, ProviderCredentials>,
         HashMap<String, DateTime<Utc>>,
+        HashMap<String, i32>,
     ) {
         let mut creds_map = HashMap::new();
         let mut expires_map = HashMap::new();
@@ -285,7 +318,41 @@ impl ProviderRegistry {
                 }
             }
         }
-        (creds_map, expires_map)
+
+        // Also load Copilot tokens from user_copilot_tokens (separate table)
+        if let Ok(Some(row)) = db.get_copilot_tokens(user_id).await {
+            if let (Some(copilot_token), Some(base_url), Some(expires_at)) =
+                (row.copilot_token, row.base_url, row.expires_at)
+            {
+                let now = Utc::now();
+                if expires_at > now {
+                    creds_map.insert(
+                        "copilot".to_string(),
+                        ProviderCredentials {
+                            provider: ProviderId::Copilot,
+                            access_token: copilot_token,
+                            base_url: Some(base_url),
+                        },
+                    );
+                    expires_map.insert("copilot".to_string(), expires_at);
+                }
+            }
+        }
+
+        // Load provider priority
+        let priority_map = match db.get_user_provider_priority(user_id).await {
+            Ok(rows) => rows.into_iter().collect(),
+            Err(e) => {
+                tracing::warn!(
+                    error = ?e,
+                    user_id = %user_id,
+                    "Failed to load provider priority, using defaults"
+                );
+                HashMap::new()
+            }
+        };
+
+        (creds_map, expires_map, priority_map)
     }
 }
 
@@ -402,6 +469,7 @@ mod tests {
             CacheEntry {
                 credentials: HashMap::new(),
                 expires_at: HashMap::new(),
+                priority: HashMap::new(),
                 cached_at: Instant::now(),
             },
         );
@@ -432,6 +500,7 @@ mod tests {
             CacheEntry {
                 credentials: creds_map,
                 expires_at: HashMap::new(),
+                priority: HashMap::new(),
                 cached_at: Instant::now(),
             },
         );
@@ -453,6 +522,7 @@ mod tests {
             CacheEntry {
                 credentials: HashMap::new(),
                 expires_at: HashMap::new(),
+                priority: HashMap::new(),
                 cached_at: Instant::now(),
             },
         );
@@ -561,6 +631,7 @@ mod tests {
             CacheEntry {
                 credentials: creds_map,
                 expires_at: expires_map,
+                priority: HashMap::new(),
                 cached_at: Instant::now(),
             },
         );
@@ -633,11 +704,321 @@ mod tests {
             CacheEntry {
                 credentials: HashMap::new(),
                 expires_at: expires_map,
+                priority: HashMap::new(),
                 cached_at: Instant::now(),
             },
         );
 
         let entry = registry.cache.get(&uid).unwrap();
         assert_eq!(entry.expires_at.get("anthropic"), Some(&future));
+    }
+
+    // ── Priority selection tests ─────────────────────────────────────
+
+    #[test]
+    fn test_pick_best_provider_no_credentials() {
+        let creds = HashMap::new();
+        let priority = HashMap::new();
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        assert_eq!(provider, ProviderId::Kiro);
+        assert!(c.is_none());
+    }
+
+    #[test]
+    fn test_pick_best_provider_native_only() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "anthropic".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Anthropic,
+                access_token: "sk-ant".to_string(),
+                base_url: None,
+            },
+        );
+        let priority = HashMap::new();
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        assert_eq!(provider, ProviderId::Anthropic);
+        assert_eq!(c.unwrap().access_token, "sk-ant");
+    }
+
+    #[test]
+    fn test_pick_best_provider_copilot_only() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        let priority = HashMap::new();
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        assert_eq!(provider, ProviderId::Copilot);
+        assert_eq!(c.unwrap().access_token, "cop-tok");
+    }
+
+    #[test]
+    fn test_pick_best_provider_both_no_priority_prefers_native() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "anthropic".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Anthropic,
+                access_token: "sk-ant".to_string(),
+                base_url: None,
+            },
+        );
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        // No priority set — native default=0, copilot default=1 → native wins
+        let priority = HashMap::new();
+        let (provider, _) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        assert_eq!(provider, ProviderId::Anthropic);
+    }
+
+    #[test]
+    fn test_pick_best_provider_copilot_higher_priority() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "openai".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::OpenAI,
+                access_token: "sk-oai".to_string(),
+                base_url: None,
+            },
+        );
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        // User sets copilot priority=1, openai priority=2 → copilot wins
+        let mut priority = HashMap::new();
+        priority.insert("copilot".to_string(), 1);
+        priority.insert("openai".to_string(), 2);
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
+        assert_eq!(provider, ProviderId::Copilot);
+        assert_eq!(c.unwrap().access_token, "cop-tok");
+    }
+
+    #[test]
+    fn test_pick_best_provider_native_higher_priority() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "anthropic".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Anthropic,
+                access_token: "sk-ant".to_string(),
+                base_url: None,
+            },
+        );
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        // User sets anthropic priority=1, copilot priority=5 → anthropic wins
+        let mut priority = HashMap::new();
+        priority.insert("anthropic".to_string(), 1);
+        priority.insert("copilot".to_string(), 5);
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        assert_eq!(provider, ProviderId::Anthropic);
+        assert_eq!(c.unwrap().access_token, "sk-ant");
+    }
+
+    #[test]
+    fn test_pick_best_provider_equal_priority_prefers_native() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "openai".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::OpenAI,
+                access_token: "sk-oai".to_string(),
+                base_url: None,
+            },
+        );
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        // Equal priority → native wins (tie-break)
+        let mut priority = HashMap::new();
+        priority.insert("openai".to_string(), 1);
+        priority.insert("copilot".to_string(), 1);
+        let (provider, _) =
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
+        assert_eq!(provider, ProviderId::OpenAI);
+    }
+
+    #[tokio::test]
+    async fn test_resolve_provider_cache_with_priority_picks_copilot() {
+        let registry = ProviderRegistry::new();
+        let uid = Uuid::new_v4();
+
+        let mut creds_map = HashMap::new();
+        creds_map.insert(
+            "anthropic".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Anthropic,
+                access_token: "sk-ant".to_string(),
+                base_url: None,
+            },
+        );
+        creds_map.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        let mut priority_map = HashMap::new();
+        priority_map.insert("copilot".to_string(), 1);
+        priority_map.insert("anthropic".to_string(), 2);
+
+        registry.cache.insert(
+            uid,
+            CacheEntry {
+                credentials: creds_map,
+                expires_at: HashMap::new(),
+                priority: priority_map,
+                cached_at: Instant::now(),
+            },
+        );
+
+        let (provider, creds) = registry
+            .resolve_provider(Some(uid), "claude-sonnet-4", None)
+            .await;
+        assert_eq!(provider, ProviderId::Copilot);
+        assert_eq!(creds.unwrap().access_token, "cop-tok");
+    }
+
+    #[test]
+    fn test_pick_best_provider_copilot_for_openai_model() {
+        // Copilot can serve OpenAI models too
+        let mut creds = HashMap::new();
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        let priority = HashMap::new();
+        let (provider, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
+        assert_eq!(provider, ProviderId::Copilot);
+        assert_eq!(c.unwrap().access_token, "cop-tok");
+    }
+
+    #[test]
+    fn test_pick_best_provider_copilot_for_gemini_model() {
+        // Copilot can serve Gemini models too
+        let mut creds = HashMap::new();
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.githubcopilot.com".to_string()),
+            },
+        );
+        let priority = HashMap::new();
+        let (provider, _) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Gemini, &creds, &priority);
+        assert_eq!(provider, ProviderId::Copilot);
+    }
+
+    #[test]
+    fn test_pick_best_provider_copilot_base_url_preserved() {
+        let mut creds = HashMap::new();
+        creds.insert(
+            "copilot".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Copilot,
+                access_token: "cop-tok".to_string(),
+                base_url: Some("https://api.business.githubcopilot.com".to_string()),
+            },
+        );
+        let priority = HashMap::new();
+        let (_, c) =
+            ProviderRegistry::pick_best_provider(&ProviderId::Anthropic, &creds, &priority);
+        let c = c.unwrap();
+        assert_eq!(
+            c.base_url.unwrap(),
+            "https://api.business.githubcopilot.com"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_provider_stale_cache_falls_back_to_kiro_without_db() {
+        let registry = ProviderRegistry::new();
+        let uid = Uuid::new_v4();
+
+        // Insert a cache entry that's already expired (cached_at in the past)
+        let mut creds_map = HashMap::new();
+        creds_map.insert(
+            "anthropic".to_string(),
+            ProviderCredentials {
+                provider: ProviderId::Anthropic,
+                access_token: "sk-ant".to_string(),
+                base_url: None,
+            },
+        );
+        registry.cache.insert(
+            uid,
+            CacheEntry {
+                credentials: creds_map,
+                expires_at: HashMap::new(),
+                priority: HashMap::new(),
+                cached_at: Instant::now() - Duration::from_secs(600), // 10 min ago, past TTL
+            },
+        );
+
+        // No DB provided — should fall back to Kiro
+        let (provider, creds) = registry
+            .resolve_provider(Some(uid), "claude-sonnet-4", None)
+            .await;
+        assert_eq!(provider, ProviderId::Kiro);
+        assert!(creds.is_none());
+    }
+
+    #[test]
+    fn test_provider_registry_default() {
+        let registry = ProviderRegistry::default();
+        assert_eq!(registry.cache.len(), 0);
+        assert_eq!(registry.refresh_locks.len(), 0);
+    }
+
+    #[test]
+    fn test_provider_for_model_o4_prefix() {
+        assert_eq!(
+            ProviderRegistry::provider_for_model("o4-mini"),
+            Some(ProviderId::OpenAI)
+        );
     }
 }

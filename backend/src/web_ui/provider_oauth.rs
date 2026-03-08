@@ -467,6 +467,17 @@ async fn providers_status(
         );
     }
 
+    // Add Copilot status (separate table, no email — uses github_username)
+    let copilot_connected = config_db.has_copilot_token(user_id).await.unwrap_or(false);
+    providers.insert(
+        "copilot".to_string(),
+        serde_json::to_value(ProviderStatusInfo {
+            connected: copilot_connected,
+            email: None,
+        })
+        .unwrap_or_default(),
+    );
+
     Ok(Json(ProvidersStatusResponse { providers }))
 }
 
@@ -501,7 +512,11 @@ async fn provider_connect(
         let s = headers
             .get("x-forwarded-proto")
             .and_then(|v| v.to_str().ok())
-            .unwrap_or(if h.starts_with("localhost") { "http" } else { "https" });
+            .unwrap_or(if h.starts_with("localhost") {
+                "http"
+            } else {
+                "https"
+            });
         (s, h)
     };
 
@@ -603,7 +618,11 @@ async fn relay_script(
         let s = headers
             .get("x-forwarded-proto")
             .and_then(|v| v.to_str().ok())
-            .unwrap_or(if h.starts_with("localhost") { "http" } else { "https" });
+            .unwrap_or(if h.starts_with("localhost") {
+                "http"
+            } else {
+                "https"
+            });
         (s, h)
     };
 
@@ -622,7 +641,9 @@ async fn relay_script(
     // Provider-specific extra params
     match provider.as_str() {
         "openai" => {
-            auth_url.push_str("&prompt=login&id_token_add_organizations=true&codex_cli_simplified_flow=true");
+            auth_url.push_str(
+                "&prompt=login&id_token_add_organizations=true&codex_cli_simplified_flow=true",
+            );
         }
         "gemini" => {
             auth_url.push_str("&access_type=offline&prompt=consent");
@@ -1052,10 +1073,15 @@ mod tests {
     #[test]
     fn test_connect_response_serialization() {
         let resp = ConnectResponse {
-            relay_script_url: "https://gw.example.com/_ui/api/providers/anthropic/relay-script?token=abc".to_string(),
+            relay_script_url:
+                "https://gw.example.com/_ui/api/providers/anthropic/relay-script?token=abc"
+                    .to_string(),
         };
         let json = serde_json::to_value(&resp).unwrap();
-        assert!(json["relay_script_url"].as_str().unwrap().contains("relay-script?token="));
+        assert!(json["relay_script_url"]
+            .as_str()
+            .unwrap()
+            .contains("relay-script?token="));
     }
 
     #[test]
@@ -1085,8 +1111,13 @@ mod tests {
         let resp = ProvidersStatusResponse { providers };
         let json = serde_json::to_value(&resp).unwrap();
         // All three providers must always be present
-        assert!(json["providers"]["anthropic"]["connected"].as_bool().unwrap());
-        assert_eq!(json["providers"]["anthropic"]["email"], "user@anthropic.com");
+        assert!(json["providers"]["anthropic"]["connected"]
+            .as_bool()
+            .unwrap());
+        assert_eq!(
+            json["providers"]["anthropic"]["email"],
+            "user@anthropic.com"
+        );
         assert!(!json["providers"]["gemini"]["connected"].as_bool().unwrap());
         assert!(!json["providers"]["openai"]["connected"].as_bool().unwrap());
     }
@@ -1131,7 +1162,10 @@ mod tests {
 
         let entry = pending.get("token-x").unwrap();
         let request_state = "wrong-state";
-        assert_ne!(entry.state, request_state, "State mismatch should be detected");
+        assert_ne!(
+            entry.state, request_state,
+            "State mismatch should be detected"
+        );
         assert_eq!(entry.state, stored_state);
     }
 
@@ -1151,7 +1185,10 @@ mod tests {
 
         let entry = pending.get("token-y").unwrap();
         // Request comes in on /providers/openai/relay but token was for anthropic
-        assert_ne!(entry.provider, "openai", "Provider mismatch should be detected");
+        assert_ne!(
+            entry.provider, "openai",
+            "Provider mismatch should be detected"
+        );
         assert_eq!(entry.provider, "anthropic");
     }
 
@@ -1194,7 +1231,13 @@ mod tests {
 
     #[test]
     fn test_relay_token_ttl_constants() {
-        assert_eq!(RELAY_TOKEN_TTL_SECS, 600, "Relay token TTL should be 10 minutes");
-        assert_eq!(MAX_PENDING_RELAYS, 10_000, "Max pending relays should be 10k");
+        assert_eq!(
+            RELAY_TOKEN_TTL_SECS, 600,
+            "Relay token TTL should be 10 minutes"
+        );
+        assert_eq!(
+            MAX_PENDING_RELAYS, 10_000,
+            "Max pending relays should be 10k"
+        );
     }
 }

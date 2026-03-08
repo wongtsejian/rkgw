@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { KiroSetup } from '../components/KiroSetup'
+import { CopilotSetup } from '../components/CopilotSetup'
 import { ApiKeyManager } from '../components/ApiKeyManager'
 import { useSession } from '../components/SessionGate'
 import { useToast } from '../components/Toast'
@@ -233,6 +234,11 @@ export function Profile() {
       <h2 className="section-header">KIRO TOKEN</h2>
       <div className="mb-24">
         <KiroSetup />
+      </div>
+
+      <h2 className="section-header">GITHUB COPILOT</h2>
+      <div className="mb-24">
+        <CopilotSetup />
       </div>
 
       <h2 className="section-header">API KEYS</h2>

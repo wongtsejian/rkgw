@@ -34,6 +34,9 @@ services:
       KIRO_SSO_URL: "${KIRO_SSO_URL:-}"
       LOG_LEVEL: "${LOG_LEVEL:-info}"
       DEBUG_MODE: "${DEBUG_MODE:-off}"
+      GITHUB_COPILOT_CLIENT_ID: "${GITHUB_COPILOT_CLIENT_ID:-}"
+      GITHUB_COPILOT_CLIENT_SECRET: "${GITHUB_COPILOT_CLIENT_SECRET:-}"
+      GITHUB_COPILOT_CALLBACK_URL: "${GITHUB_COPILOT_CALLBACK_URL:-}"
     labels:
       com.datadoghq.ad.logs: '[{"source": "rust", "service": "rkgw-gateway"}]'
       com.datadoghq.tags.env: "${DD_ENV:-production}"

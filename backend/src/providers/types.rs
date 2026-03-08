@@ -15,6 +15,8 @@ pub enum ProviderId {
     OpenAI,
     #[serde(rename = "gemini")]
     Gemini,
+    #[serde(rename = "copilot")]
+    Copilot,
 }
 
 impl ProviderId {
@@ -25,6 +27,7 @@ impl ProviderId {
             ProviderId::Anthropic => "anthropic",
             ProviderId::OpenAI => "openai",
             ProviderId::Gemini => "gemini",
+            ProviderId::Copilot => "copilot",
         }
     }
 }
@@ -44,6 +47,7 @@ impl std::str::FromStr for ProviderId {
             "anthropic" => Ok(ProviderId::Anthropic),
             "openai" => Ok(ProviderId::OpenAI),
             "gemini" => Ok(ProviderId::Gemini),
+            "copilot" => Ok(ProviderId::Copilot),
             other => Err(format!("Unknown provider: {}", other)),
         }
     }
@@ -89,12 +93,14 @@ mod tests {
         assert_eq!(ProviderId::Anthropic.as_str(), "anthropic");
         assert_eq!(ProviderId::OpenAI.as_str(), "openai");
         assert_eq!(ProviderId::Gemini.as_str(), "gemini");
+        assert_eq!(ProviderId::Copilot.as_str(), "copilot");
     }
 
     #[test]
     fn test_provider_id_display() {
         assert_eq!(ProviderId::Anthropic.to_string(), "anthropic");
         assert_eq!(ProviderId::OpenAI.to_string(), "openai");
+        assert_eq!(ProviderId::Copilot.to_string(), "copilot");
     }
 
     #[test]
@@ -107,6 +113,10 @@ mod tests {
         );
         assert_eq!(ProviderId::from_str("openai").unwrap(), ProviderId::OpenAI);
         assert_eq!(ProviderId::from_str("gemini").unwrap(), ProviderId::Gemini);
+        assert_eq!(
+            ProviderId::from_str("copilot").unwrap(),
+            ProviderId::Copilot
+        );
         assert!(ProviderId::from_str("unknown").is_err());
     }
 
@@ -115,12 +125,19 @@ mod tests {
         let id = ProviderId::Anthropic;
         let json = serde_json::to_string(&id).unwrap();
         assert_eq!(json, "\"anthropic\"");
+
+        let id = ProviderId::Copilot;
+        let json = serde_json::to_string(&id).unwrap();
+        assert_eq!(json, "\"copilot\"");
     }
 
     #[test]
     fn test_provider_id_deserialize() {
         let id: ProviderId = serde_json::from_str("\"openai\"").unwrap();
         assert_eq!(id, ProviderId::OpenAI);
+
+        let id: ProviderId = serde_json::from_str("\"copilot\"").unwrap();
+        assert_eq!(id, ProviderId::Copilot);
     }
 
     #[test]
@@ -133,5 +150,60 @@ mod tests {
         let cloned = creds.clone();
         assert_eq!(cloned.provider, ProviderId::Anthropic);
         assert_eq!(cloned.access_token, "sk-ant-test");
+    }
+
+    #[test]
+    fn test_provider_id_serde_round_trip() {
+        for id in [
+            ProviderId::Kiro,
+            ProviderId::Anthropic,
+            ProviderId::OpenAI,
+            ProviderId::Gemini,
+            ProviderId::Copilot,
+        ] {
+            let json = serde_json::to_string(&id).unwrap();
+            let back: ProviderId = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, id);
+        }
+    }
+
+    #[test]
+    fn test_provider_id_deserialize_unknown_fails() {
+        let result = serde_json::from_str::<ProviderId>("\"azure\"");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_provider_id_hash_eq() {
+        use std::collections::HashSet;
+        let mut set = HashSet::new();
+        set.insert(ProviderId::Copilot);
+        set.insert(ProviderId::Copilot);
+        assert_eq!(set.len(), 1);
+        set.insert(ProviderId::Kiro);
+        assert_eq!(set.len(), 2);
+    }
+
+    #[test]
+    fn test_provider_credentials_with_base_url() {
+        let creds = ProviderCredentials {
+            provider: ProviderId::Copilot,
+            access_token: "cop-tok".to_string(),
+            base_url: Some("https://api.business.githubcopilot.com".to_string()),
+        };
+        let cloned = creds.clone();
+        assert_eq!(cloned.provider, ProviderId::Copilot);
+        assert_eq!(
+            cloned.base_url.unwrap(),
+            "https://api.business.githubcopilot.com"
+        );
+    }
+
+    #[test]
+    fn test_provider_id_from_str_error_message() {
+        use std::str::FromStr;
+        let err = ProviderId::from_str("azure").unwrap_err();
+        assert!(err.contains("Unknown provider"));
+        assert!(err.contains("azure"));
     }
 }

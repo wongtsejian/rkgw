@@ -221,8 +221,10 @@ async fn main() -> Result<()> {
         anthropic_provider: Arc::new(providers::anthropic::AnthropicProvider::new()),
         openai_provider: Arc::new(providers::openai::OpenAIProvider::new()),
         gemini_provider: Arc::new(providers::gemini::GeminiProvider::new()),
+        copilot_provider: Arc::new(providers::copilot::CopilotProvider::new()),
         provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
         token_exchanger: Arc::new(web_ui::provider_oauth::HttpTokenExchanger::new()),
+        copilot_token_cache: Arc::new(dashmap::DashMap::new()),
     };
 
     // ── Guardrails (skip in proxy-only mode) ────────────────────────
@@ -269,6 +271,10 @@ async fn main() -> Result<()> {
     if !is_proxy_only {
         if let Some(ref db) = app_state.config_db {
             web_ui::user_kiro::spawn_token_refresh_task(Arc::clone(db));
+            web_ui::copilot_auth::spawn_copilot_token_refresh_task(
+                Arc::clone(db),
+                Arc::clone(&app_state.copilot_token_cache),
+            );
             web_ui::session::SessionService::spawn_cleanup_task(
                 Arc::clone(db),
                 Arc::clone(&app_state.session_cache),

@@ -43,6 +43,21 @@ test.describe('Profile page', () => {
     await expect(apiKeysTitle).toBeVisible()
   })
 
+  test('GITHUB COPILOT section renders with status badge', async ({ page }) => {
+    await navigateTo(page, '/profile')
+
+    const copilotHeader = page.locator('h2.section-header', { hasText: 'GITHUB COPILOT' })
+    await expect(copilotHeader).toBeVisible()
+
+    const copilotTitle = page.locator(Card.title, { hasText: 'github copilot' })
+    await expect(copilotTitle).toBeVisible()
+
+    // Status badge should be one of: tag-ok (CONNECTED), tag-warn (EXPIRED), tag-err (NOT CONNECTED)
+    const copilotSection = copilotHeader.locator('~ div').first()
+    const statusBadge = copilotSection.locator(`${Status.ok}, ${Status.warn}, ${Status.err}`).first()
+    await expect(statusBadge).toBeVisible()
+  })
+
   test('PROVIDERS section renders', async ({ page }) => {
     await navigateTo(page, '/profile')
 

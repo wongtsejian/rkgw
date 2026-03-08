@@ -264,6 +264,25 @@ export function disconnectProvider(provider: string) {
   return apiDelete(`/providers/${provider}`)
 }
 
+// --- Copilot Types ---
+
+export interface CopilotStatus {
+  connected: boolean
+  github_username: string | null
+  copilot_plan: string | null
+  expired: boolean
+}
+
+// --- Copilot API ---
+
+export function getCopilotStatus() {
+  return apiFetch<CopilotStatus>('/copilot/status')
+}
+
+export function disconnectCopilot() {
+  return apiDelete('/copilot/disconnect')
+}
+
 // --- MCP Types ---
 
 export interface McpClientConfig {

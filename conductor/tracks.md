@@ -2,6 +2,7 @@
 
 | Status | Track ID | Title | Created | Updated |
 | ------ | -------- | ----- | ------- | ------- |
+| completed | copilot-provider-support_20260308 | Add GitHub Copilot Provider Support | 2026-03-08 | 2026-03-08 |
 
 <!-- Tracks registered by /conductor:new-track -->
 
