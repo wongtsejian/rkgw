@@ -7,7 +7,7 @@ nav_order: 7
 # Module Reference
 {: .no_toc }
 
-Overview of all source modules in the Kiro Gateway codebase, their responsibilities, and how they interconnect.
+Overview of all source modules in the Kiro Gateway codebase, their responsibilities, and how they interconnect. The gateway supports multiple AI providers (Kiro, Anthropic, OpenAI, Gemini, Copilot, Qwen) via a `Provider` trait and `ProviderRegistry`.
 {: .fs-6 .fw-300 }
 
 <details open markdown="block">
@@ -35,7 +35,7 @@ graph TD
     resolver["resolver.rs<br/><i>Model name aliases</i>"]
     cache["cache.rs<br/><i>Model list cache</i>"]
     metrics["metrics/<br/><i>Request tracking</i>"]
-    web_ui["web_ui/<br/><i>Google SSO, API keys,<br/>sessions, config API</i>"]
+    web_ui["web_ui/<br/><i>Google SSO, API keys,<br/>sessions, config API,<br/>provider OAuth</i>"]
     log_capture["log_capture.rs<br/><i>Tracing → SSE logs</i>"]
     truncation["truncation.rs<br/><i>Truncation recovery</i>"]
     thinking["thinking_parser.rs<br/><i>Reasoning extraction</i>"]
@@ -44,6 +44,7 @@ graph TD
     bench["bench/<br/><i>Benchmarking</i>"]
     guardrails["guardrails/<br/><i>CEL rules + Bedrock<br/>content validation</i>"]
     mcp["mcp/<br/><i>MCP Gateway: tool servers,<br/>JSON-RPC, transports</i>"]
+    providers["providers/<br/><i>Provider trait, registry,<br/>Kiro/Anthropic/OpenAI/<br/>Gemini/Copilot/Qwen</i>"]
 
     main --> config
     main --> routes
@@ -51,6 +52,7 @@ graph TD
     main --> log_capture
     main --> guardrails
     main --> mcp
+    main --> providers
 
     routes --> middleware
     routes --> converters
@@ -63,6 +65,7 @@ graph TD
     routes --> tokenizer
     routes --> guardrails
     routes --> mcp
+    routes --> providers
 
     converters --> models
     converters --> thinking
@@ -82,6 +85,7 @@ graph TD
 
     mcp --> web_ui
     guardrails --> web_ui
+    providers --> web_ui
 
     style main fill:#4a9eff,color:#fff
     style routes fill:#ff6b6b,color:#fff
@@ -93,6 +97,7 @@ graph TD
     style log_capture fill:#ff922b,color:#fff
     style guardrails fill:#e64980,color:#fff
     style mcp fill:#20c997,color:#fff
+    style providers fill:#339af0,color:#fff
 ```
 
 ---
@@ -184,6 +189,9 @@ graph TD
 | `web_ui::config_api` | `backend/src/web_ui/config_api.rs` | Config field validation and metadata. `classify_config_change()` determines if a field change can be hot-reloaded or requires restart. `validate_config_field()` validates types and ranges. `get_config_field_descriptions()` provides human-readable descriptions for the config UI. |
 | `web_ui::config_db` | `backend/src/web_ui/config_db.rs` | `ConfigDb` — PostgreSQL-backed configuration persistence using `sqlx`. Auto-creates `config`, `config_history`, and `schema_version` tables. Provides `get/set/get_all`, `load_into_config()` overlay, `save_initial_setup()`, `save_oauth_setup()`, and `get_history()` with automatic pruning (keeps last 1000 entries). All writes are transactional. |
 | `web_ui::sse` | `backend/src/web_ui/sse.rs` | Server-Sent Event streams for the Web UI. `metrics_stream` pushes metrics snapshots every 1 second. `logs_stream` pushes new log entries every 500ms. Both include 15-second keep-alive pings. |
+| `web_ui::copilot_auth` | `backend/src/web_ui/copilot_auth.rs` | GitHub Copilot OAuth flow. Two-step process: GitHub OAuth for user authorization, then Copilot-specific token exchange via `copilot_internal/v2/token`. Stores Copilot token + base URL in DB and `copilot_token_cache`. |
+| `web_ui::qwen_auth` | `backend/src/web_ui/qwen_auth.rs` | Qwen Coder device flow (RFC 8628). Endpoints for initiating device authorization, polling for token, checking status, and disconnecting. Uses `qwen_device_pending` DashMap for in-flight flows (10-min TTL, 10k cap). |
+| `web_ui::provider_oauth` | `backend/src/web_ui/provider_oauth.rs` | Provider OAuth relay for Anthropic (PKCE flow). Defines `TokenExchanger` trait (mockable for tests), `ProviderOAuthPendingState`, and OAuth config per provider. Handles authorization redirect, code exchange, and token storage in `user_provider_tokens`. |
 
 ### Guardrails
 
@@ -196,6 +204,21 @@ graph TD
 | `guardrails::db` | `backend/src/guardrails/db.rs` | `GuardrailsDb` — PostgreSQL layer for guardrail profiles and rules. Three tables: `guardrail_profiles`, `guardrail_rules`, `guardrail_rule_profiles` (junction). CRUD operations + `load_config()` for in-memory snapshot. |
 | `guardrails::api` | `backend/src/guardrails/api.rs` | Admin API handlers for guardrail profiles and rules CRUD. Includes test endpoint for validating a profile against Bedrock and CEL expression validation endpoint. All admin-only with session + CSRF. |
 | `guardrails::types` | `backend/src/guardrails/types.rs` | Type definitions: `GuardrailRule`, `GuardrailProfile`, `GuardrailAction` (None/Intervened/Redacted), `ApplyTo` (Input/Output/Both), `RequestContext`, `GuardrailViolation`, `GuardrailCheckResult`. |
+
+### Providers
+
+| Module | File(s) | Description |
+|--------|---------|-------------|
+| `providers` | `backend/src/providers/mod.rs` | Module root. Re-exports all provider implementations, the registry, trait, and types. |
+| `providers::traits` | `backend/src/providers/traits.rs` | `Provider` trait — the uniform interface all AI providers implement. Defines `execute_openai()`, `stream_openai()`, `execute_anthropic()`, `stream_anthropic()` methods. Each provider handles both OpenAI-format and Anthropic-format inputs. |
+| `providers::types` | `backend/src/providers/types.rs` | Type definitions: `ProviderId` enum (Kiro, Anthropic, OpenAI, Gemini, Copilot, Qwen), `ProviderCredentials` (provider + access_token + optional base_url), `ProviderContext` (per-request credentials + model), `ProviderResponse`, `ProviderStreamItem`. |
+| `providers::registry` | `backend/src/providers/registry.rs` | `ProviderRegistry` — resolves which provider to use for a given user + model. Caches per-user provider credentials in memory (5-minute TTL). Handles transparent token refresh for OAuth-based providers with per-(user, provider) mutexes to prevent refresh storms. |
+| `providers::kiro` | `backend/src/providers/kiro.rs` | Kiro provider — the default. Routes requests through the format converter pipeline (OpenAI/Anthropic → Kiro) and streaming pipeline (AWS Event Stream → SSE). Uses `KiroHttpClient` and `AuthManager` for token management. |
+| `providers::anthropic` | `backend/src/providers/anthropic.rs` | Anthropic provider — direct relay to `api.anthropic.com`. Passes OpenAI-format requests through conversion, relays Anthropic-format requests natively. |
+| `providers::openai` | `backend/src/providers/openai.rs` | OpenAI provider — direct relay to `api.openai.com`. Relays OpenAI-format requests natively, converts Anthropic-format requests. |
+| `providers::gemini` | `backend/src/providers/gemini.rs` | Gemini provider — direct relay to `generativelanguage.googleapis.com`. Handles format conversion for both OpenAI and Anthropic inputs. |
+| `providers::copilot` | `backend/src/providers/copilot.rs` | Copilot provider — relay to GitHub Copilot API. Uses Copilot-specific headers (Editor-Version, Editor-Plugin-Version, Copilot-Integration-Id). Base URL from token exchange (may vary for enterprise). |
+| `providers::qwen` | `backend/src/providers/qwen.rs` | Qwen provider — relay to `chat.qwen.ai`. Handles Qwen-specific API format and authentication. |
 
 ### MCP Gateway
 
@@ -254,6 +277,16 @@ All request handlers receive shared application state via Axum's `State` extract
 - `oauth_pending: Arc<DashMap<String, OAuthPendingState>>` — PKCE state (10-min TTL, 10k cap)
 - `mcp_manager: Option<Arc<McpManager>>` — MCP Gateway orchestrator (None when disabled or not yet initialized)
 - `guardrails_engine: Option<Arc<GuardrailsEngine>>` — Content validation engine (None when disabled or no DB)
+- `provider_registry: Arc<ProviderRegistry>` — resolves provider + credentials per user/model (5-min credential cache)
+- `anthropic_provider: Arc<AnthropicProvider>` — direct Anthropic API provider
+- `openai_provider: Arc<OpenAIProvider>` — direct OpenAI API provider
+- `gemini_provider: Arc<GeminiProvider>` — direct Gemini API provider
+- `copilot_provider: Arc<CopilotProvider>` — direct GitHub Copilot API provider
+- `qwen_provider: Arc<QwenProvider>` — direct Qwen Coder API provider
+- `provider_oauth_pending: Arc<DashMap<String, ProviderOAuthPendingState>>` — PKCE state for provider OAuth relay (separate from Google SSO)
+- `token_exchanger: Arc<dyn TokenExchanger>` — OAuth token exchange abstraction (mockable for tests)
+- `copilot_token_cache: Arc<DashMap<Uuid, (String, String, Instant)>>` — per-user Copilot tokens (token, base_url, cached_at)
+- `qwen_device_pending: QwenDevicePendingMap` — pending Qwen device flow states (10-min TTL, 10k cap)
 
 ### Request Guard
 

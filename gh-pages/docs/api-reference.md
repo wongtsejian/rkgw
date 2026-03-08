@@ -722,6 +722,9 @@ All web UI API endpoints are under `/_ui/api/`. See the [Web Dashboard](web-ui.h
 | `POST` | `/_ui/api/auth/logout` | End session |
 | `*` | `/_ui/api/kiro/*` | Kiro token management |
 | `*` | `/_ui/api/keys/*` | API key management |
+| `*` | `/_ui/api/copilot/*` | GitHub Copilot OAuth (connect/callback/status/disconnect) |
+| `*` | `/_ui/api/qwen/*` | Qwen Coder device flow (connect/poll/status/disconnect) |
+| `*` | `/_ui/api/providers/*` | Provider OAuth relay and priority management |
 
 ### Admin-Only (Session + CSRF + Admin Role)
 

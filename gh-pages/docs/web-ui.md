@@ -17,19 +17,18 @@ The frontend is a React 19 SPA built with Vite and TypeScript, served as static 
 ```mermaid
 flowchart TB
     subgraph Browser["Browser (React SPA)"]
-        Setup[Setup Wizard]
+        Login[Login Page]
+        Profile[Profile Page]
         Config[Config Manager]
-        Metrics[Metrics Dashboard]
-        Logs[Log Viewer]
-        Users[User Management]
-        Keys[API Key Management]
+        Admin[Admin Panel]
+        Guardrails[Guardrails Config]
+        MCP[MCP Client Manager]
     end
 
     subgraph Nginx["nginx (:443/:80)"]
         Static["/_ui/* → static files"]
         Proxy["/_ui/api/* → backend:8000"]
         ProxyV1["/v1/* → backend:8000"]
-        Certbot["/.well-known/ → certbot"]
     end
 
     subgraph Backend["Rust Backend (plain HTTP :8000)"]
@@ -39,34 +38,40 @@ flowchart TB
             GoogleCB[GET /auth/google/callback]
         end
         subgraph SessionAPI["Session-Authenticated API"]
-            MetricsAPI[GET /metrics]
-            SystemAPI[GET /system]
-            ModelsAPI[GET /models]
-            LogsAPI[GET /logs]
+            AuthMe[GET /auth/me]
             ConfigRead[GET /config]
             SchemaAPI[GET /config/schema]
-            HistoryAPI[GET /config/history]
-            AuthMe[GET /auth/me]
-            StreamMetrics[SSE /stream/metrics]
-            StreamLogs[SSE /stream/logs]
+            SystemAPI[GET /system]
+            ModelsAPI[GET /models]
+            KiroRoutes[Kiro token mgmt]
+            KeyRoutes[API key mgmt]
+            CopilotRoutes[Copilot OAuth]
+            QwenRoutes[Qwen device flow]
+            ProviderPriority[Provider priority]
         end
         subgraph AdminAPI["Admin API (+ CSRF)"]
             ConfigWrite[PUT /config]
             UserMgmt[User Management]
             DomainAllow[Domain Allowlist]
+            MCPAdmin[MCP client CRUD]
+            GuardrailsAdmin[Guardrails CRUD]
         end
     end
 
     Browser -->|HTTPS| Nginx
     Static --> Browser
     Proxy --> Backend
-    Setup --> GoogleAuth
+    Login --> GoogleAuth
+    Profile --> KiroRoutes
+    Profile --> CopilotRoutes
+    Profile --> QwenRoutes
+    Profile --> ProviderPriority
+    Profile --> KeyRoutes
     Config --> ConfigRead
     Config --> ConfigWrite
-    Metrics --> StreamMetrics
-    Logs --> StreamLogs
-    Users --> UserMgmt
-    Keys -->|"API Key CRUD"| SessionAPI
+    Admin --> UserMgmt
+    MCP --> MCPAdmin
+    Guardrails --> GuardrailsAdmin
 ```
 
 ---
@@ -113,6 +118,61 @@ The first user to complete Google SSO setup is automatically assigned the **Admi
 - CSRF token: separate cookie, required for all mutation endpoints (POST, PUT, DELETE)
 - Use `GET /_ui/api/auth/me` to check current session status and user info
 - Use `POST /_ui/api/auth/logout` to end the session
+
+---
+
+## Pages
+
+The Web UI is organized into the following pages, accessible via the sidebar navigation:
+
+### Profile (`/_ui/profile`)
+
+The default landing page after login. Each user manages their own credentials and settings here:
+
+- **Provider Credentials** — Connect and manage AI provider accounts:
+  - **Kiro (AWS)** — Connect via AWS SSO device code flow. Shows connection status and allows disconnect/reconnect.
+  - **GitHub Copilot** — Connect via GitHub OAuth (only available if `GITHUB_COPILOT_CLIENT_ID` is configured server-side). Shows connection status.
+  - **Qwen Coder** — Connect via device code flow (only available if `QWEN_OAUTH_CLIENT_ID` is configured). Shows device code URL for browser authorization.
+- **Provider Priority** — Drag-and-drop reordering of provider fallback priority. The gateway uses the first provider with valid credentials.
+- **API Keys** — Create, list, and revoke personal API keys for programmatic access to `/v1/*` endpoints.
+- **Kiro Token Management** — Legacy per-user Kiro token management (device code flow).
+
+### Configuration (`/_ui/config`) — Admin Only
+
+Gateway runtime configuration management:
+
+- View all configuration settings with current values
+- Edit settings with immediate hot-reload (where supported)
+- Configuration schema with field types, descriptions, and validation rules
+- Configuration change history with timestamps and old/new values
+
+### Guardrails (`/_ui/guardrails`) — Admin Only
+
+Content safety configuration powered by AWS Bedrock:
+
+- **Profiles** — Create and manage AWS Bedrock guardrail connections (guardrail ID, version, region, AWS credentials). Enable/disable individually. Test profiles against sample content.
+- **Rules** — Define when guardrails apply using CEL expressions. Configure apply direction (input/output/both), sampling rate, timeout, and linked profiles. Validate CEL syntax before saving.
+
+### MCP Clients (`/_ui/mcp`) — Admin Only
+
+MCP (Model Context Protocol) tool server management:
+
+- **Add/Edit Clients** — Configure MCP server connections with HTTP, SSE, or STDIO transport. Set authentication headers and tool whitelists.
+- **Connection Status** — Monitor each server's connection state (Connected, Connecting, Disconnected, Error).
+- **Tool Discovery** — View discovered tools per server with auto-refresh intervals.
+- **Reconnect** — Force disconnect and reconnect to refresh tool lists or recover from errors.
+
+### Admin (`/_ui/admin`) — Admin Only
+
+User and access management:
+
+- **User List** — View all registered users with their roles, status, and last login.
+- **User Detail** (`/_ui/admin/users/:userId`) — View individual user details, change roles (Admin/User), manage user status.
+- **Domain Allowlist** — Restrict Google SSO sign-in to specific email domains.
+
+### Login (`/_ui/login`)
+
+Google SSO login page with PKCE flow. Unauthenticated users are redirected here automatically.
 
 ---
 
@@ -209,6 +269,14 @@ Each user manages their own Kiro (AWS CodeWhisperer) credentials. When a request
 - Kiro tokens are cached in memory (`kiro_token_cache`) with a 4-minute TTL
 - Tokens auto-refresh before expiry
 - Managed via the Kiro token routes in the dashboard
+
+### Multi-Provider Credentials
+
+In addition to Kiro, users can connect GitHub Copilot and Qwen Coder accounts on the Profile page:
+
+- **GitHub Copilot** — OAuth authorization code flow. Requires server-side configuration (`GITHUB_COPILOT_CLIENT_ID`, `GITHUB_COPILOT_CLIENT_SECRET`, `GITHUB_COPILOT_CALLBACK_URL`).
+- **Qwen Coder** — Device code flow. Requires `QWEN_OAUTH_CLIENT_ID` in server configuration.
+- **Provider Priority** — Users set a priority order for provider fallback. The gateway routes requests to the highest-priority provider with valid credentials.
 
 ### Domain Allowlist (Admin)
 
@@ -448,6 +516,9 @@ These require a valid session and CSRF token.
 | `POST` | `/_ui/api/auth/logout` | End current session |
 | `*` | `/_ui/api/kiro/*` | Kiro token management (per-user) |
 | `*` | `/_ui/api/keys/*` | API key management (per-user) |
+| `*` | `/_ui/api/copilot/*` | GitHub Copilot OAuth connect/disconnect (per-user) |
+| `*` | `/_ui/api/qwen/*` | Qwen Coder device flow connect/disconnect (per-user) |
+| `*` | `/_ui/api/providers/*` | Provider OAuth relay and priority management (per-user) |
 
 ### Admin-Only Endpoints (Session + CSRF + Admin Role)
 
@@ -471,6 +542,11 @@ The web UI is implemented across several Rust modules in `backend/src/web_ui/`:
 - **`session.rs`** — Session cookie management and CSRF validation
 - **`api_keys.rs`** — Per-user API key CRUD (create, list, revoke)
 - **`user_kiro.rs`** — Per-user Kiro token management
+- **`copilot_auth.rs`** — GitHub Copilot OAuth connect/callback/status/disconnect
+- **`qwen_auth.rs`** — Qwen Coder device flow connect/poll/status/disconnect
+- **`provider_oauth.rs`** — Multi-provider OAuth relay and public callback routes
+- **`provider_priority.rs`** — Per-user provider priority ordering
+- **`users.rs`** — User management (admin)
 - **`config_api.rs`** — Configuration validation, change classification, and field descriptions
 - **`config_db.rs`** — PostgreSQL persistence layer for configuration key-value storage
 

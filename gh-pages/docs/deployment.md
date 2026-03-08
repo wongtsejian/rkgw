@@ -235,6 +235,14 @@ POSTGRES_PASSWORD=your_secure_password_here
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_CALLBACK_URL=https://gateway.example.com/_ui/api/auth/google/callback
+
+# GitHub Copilot OAuth (optional)
+# GITHUB_COPILOT_CLIENT_ID=
+# GITHUB_COPILOT_CLIENT_SECRET=
+# GITHUB_COPILOT_CALLBACK_URL=https://gateway.example.com/_ui/api/copilot/callback
+
+# Qwen Coder OAuth (optional — device flow, no secret required)
+# QWEN_OAUTH_CLIENT_ID=f0304373b74a44d2b584a3fb70ca9e56
 ```
 
 The following are managed automatically by `docker-compose.yml` — do **not** set them in `.env`:
@@ -281,7 +289,7 @@ On first launch, the backend starts in **setup-only mode** — the `/v1/*` proxy
 Open `https://your-domain.com/_ui/` and:
 
 1. **Sign in with Google** — the first user is automatically granted the Admin role
-2. **Add Kiro credentials** — authenticate with AWS SSO via the device code flow
+2. **Add provider credentials** — connect Kiro (AWS SSO device code flow), and optionally GitHub Copilot or Qwen Coder on the Profile page
 3. **Create an API key** — generate a personal API key for programmatic access
 
 ## Step 6: Verify
@@ -434,8 +442,13 @@ Tables are created automatically on first connection. Key tables include:
 | `users` | User accounts (Google SSO identity, role, status) |
 | `api_keys` | Per-user API keys (SHA-256 hashed, with labels) |
 | `user_kiro_credentials` | Per-user Kiro refresh tokens |
+| `user_provider_credentials` | Per-user provider credentials (Copilot, Qwen) |
+| `user_provider_priority` | Per-user provider priority ordering |
 | `config` | Key-value configuration store |
 | `config_history` | Audit log of configuration changes |
+| `mcp_clients` | MCP server connections (config, state, encrypted headers) |
+| `guardrail_profiles` | AWS Bedrock guardrail profiles (credentials encrypted) |
+| `guardrail_rules` | Guardrail rules (CEL expressions, sampling, timeouts) |
 
 ### Connection string
 

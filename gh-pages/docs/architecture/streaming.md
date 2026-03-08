@@ -11,6 +11,9 @@ permalink: /architecture/streaming/
 
 The Kiro API returns all responses — streaming and non-streaming — in AWS Event Stream binary format. This page covers how the gateway parses that binary protocol, extracts meaningful events, processes thinking blocks, detects truncation, and formats the output as Server-Sent Events (SSE) for OpenAI and Anthropic clients.
 
+This streaming pipeline is specific to the Kiro provider path. When requests are routed to direct providers (Anthropic, OpenAI, Gemini, Copilot, Qwen) via the `ProviderRegistry`, the provider's `stream_openai()` / `stream_anthropic()` trait methods handle streaming natively — the response SSE stream is relayed directly to the client without binary parsing or format conversion.
+{: .note }
+
 ## Table of Contents
 {: .no_toc .text-delta }
 

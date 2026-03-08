@@ -4,6 +4,7 @@
 | ------ | -------- | ----- | ------- | ------- |
 | completed | copilot-provider-support_20260308 | Add GitHub Copilot Provider Support | 2026-03-08 | 2026-03-08 |
 | completed | qwen-coder-provider_20260308 | Add Qwen Coder Provider Support | 2026-03-08 | 2026-03-08 |
+| completed | ghpages-crt-styling_20260308 | Update GH-Pages Styling and Content to Match Frontend CRT Aesthetic | 2026-03-08 | 2026-03-08 |
 
 <!-- Tracks registered by /conductor:new-track -->
 

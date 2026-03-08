@@ -47,6 +47,9 @@ Set these in `.env.proxy` and pass via `--env-file .env.proxy` when running `doc
 | `SERVER_PORT` | `8000` | Port the gateway listens on. |
 | `LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error`. |
 | `DEBUG_MODE` | `off` | Debug logging: `off`, `errors`, `all`. |
+| `GITHUB_COPILOT_CLIENT_ID` | | GitHub OAuth App Client ID for Copilot provider. |
+| `GITHUB_COPILOT_CLIENT_SECRET` | | GitHub OAuth App Client Secret. |
+| `GITHUB_COPILOT_CALLBACK_URL` | | OAuth callback URL (e.g., `https://{DOMAIN}/_ui/api/copilot/callback`). |
 
 ### Builder ID vs Identity Center
 
@@ -86,6 +89,15 @@ Set these in your `.env` file before running `docker compose up`. They are read 
 | `GOOGLE_CLIENT_ID` | Google OAuth 2.0 Client ID for Web UI authentication. | `123456.apps.googleusercontent.com` |
 | `GOOGLE_CLIENT_SECRET` | Google OAuth 2.0 Client Secret. | `GOCSPX-abc123` |
 | `GOOGLE_CALLBACK_URL` | OAuth redirect URI. Must match the authorized redirect URI in Google Cloud Console. | `https://gateway.example.com/_ui/api/auth/google/callback` |
+
+### Optional Provider Variables
+
+| Variable | Description | Example |
+|:---|:---|:---|
+| `GITHUB_COPILOT_CLIENT_ID` | GitHub OAuth App Client ID for Copilot provider support. | `Iv1.abc123` |
+| `GITHUB_COPILOT_CLIENT_SECRET` | GitHub OAuth App Client Secret. | `secret_abc123` |
+| `GITHUB_COPILOT_CALLBACK_URL` | Copilot OAuth callback URL. | `https://gateway.example.com/_ui/api/copilot/callback` |
+| `QWEN_OAUTH_CLIENT_ID` | Qwen Coder OAuth client ID (device flow, no secret required). Default public ID: `f0304373b74a44d2b584a3fb70ca9e56`. | `f0304373b74a44d2b584a3fb70ca9e56` |
 
 ### Auto-managed by docker-compose
 
@@ -240,6 +252,14 @@ POSTGRES_PASSWORD=change-me-to-something-strong
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_CALLBACK_URL=https://gateway.example.com/_ui/api/auth/google/callback
+
+# GitHub Copilot OAuth (optional)
+# GITHUB_COPILOT_CLIENT_ID=
+# GITHUB_COPILOT_CLIENT_SECRET=
+# GITHUB_COPILOT_CALLBACK_URL=https://gateway.example.com/_ui/api/copilot/callback
+
+# Qwen Coder OAuth (optional — device flow, no secret required)
+# QWEN_OAUTH_CLIENT_ID=f0304373b74a44d2b584a3fb70ca9e56
 ```
 
 ---

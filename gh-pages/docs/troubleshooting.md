@@ -500,6 +500,85 @@ docker compose -f docker-compose.gateway.yml --env-file .env.proxy restart gatew
 
 ---
 
+## Provider-Specific Issues
+
+### GitHub Copilot
+
+#### "Copilot not available" or connect button missing
+
+**Cause:** The Copilot provider is not configured on the server.
+
+**Solutions:**
+- Verify `GITHUB_COPILOT_CLIENT_ID`, `GITHUB_COPILOT_CLIENT_SECRET`, and `GITHUB_COPILOT_CALLBACK_URL` are set in `.env`
+- The callback URL must be `https://{DOMAIN}/_ui/api/copilot/callback`
+- Register a GitHub OAuth App at [GitHub Developer Settings](https://github.com/settings/developers) with the matching callback URL
+- Restart the backend after changing environment variables
+
+#### Copilot token refresh fails
+
+**Cause:** The GitHub OAuth refresh token has expired or been revoked.
+
+**Solutions:**
+- Go to the Profile page in the Web UI and disconnect Copilot, then reconnect
+- Check that the GitHub OAuth App is still active and not suspended
+- Verify the user hasn't revoked the app's access in their GitHub settings (Settings > Applications > Authorized OAuth Apps)
+
+#### "Failed to exchange code" during Copilot connect
+
+**Cause:** The OAuth code exchange with GitHub failed.
+
+**Solutions:**
+- Verify `GITHUB_COPILOT_CLIENT_SECRET` is correct
+- Check that the callback URL in `.env` exactly matches the one registered in the GitHub OAuth App
+- Check backend logs for the specific error: `docker compose logs backend | grep -i copilot`
+
+### Qwen Coder
+
+#### Qwen device flow not starting
+
+**Cause:** The Qwen OAuth client ID is not configured.
+
+**Solutions:**
+- Set `QWEN_OAUTH_CLIENT_ID` in `.env` (default public client ID: `f0304373b74a44d2b584a3fb70ca9e56`)
+- Restart the backend after changing environment variables
+
+#### Qwen rate limiting (429 errors)
+
+**Cause:** The Qwen API has rate limits that may be stricter than Kiro's.
+
+**Solutions:**
+- Reduce request frequency to the Qwen provider
+- Set provider priority in the Profile page to prefer Kiro or Copilot for high-traffic use
+- Check if the Qwen account tier has higher rate limits available
+
+#### Qwen device code expired
+
+**Cause:** The device code flow timed out before the user authorized in the browser.
+
+**Solution:** Go to the Profile page, disconnect Qwen, and start the connect flow again. Complete the browser authorization promptly when the device code URL appears.
+
+### Provider Priority and Fallback
+
+#### Requests using wrong provider
+
+**Cause:** Provider priority order may not be set as expected.
+
+**Solutions:**
+- Check the Profile page to verify your provider priority order
+- The gateway uses the first available provider in priority order — if a higher-priority provider's credentials are expired, it falls back to the next
+- Reconnect any providers showing as disconnected
+
+#### "No provider credentials available"
+
+**Cause:** None of the user's configured providers have valid credentials.
+
+**Solutions:**
+- Go to the Profile page and check the status of each connected provider
+- Reconnect any providers with expired tokens
+- Ensure at least one provider (Kiro, Copilot, or Qwen) is connected and active
+
+---
+
 ## Datadog APM Issues
 
 ### No traces appearing in Datadog

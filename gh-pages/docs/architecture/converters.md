@@ -9,7 +9,9 @@ permalink: /architecture/converters/
 # Format Translation System
 {: .no_toc }
 
-The converter modules are the heart of Kiro Gateway's protocol translation capability. They handle bidirectional conversion between OpenAI, Anthropic, and Kiro API formats — covering messages, tool calls, images, system prompts, and streaming events. This page documents the converter architecture, the unified intermediate representation, and field-level mapping details.
+The converter modules handle bidirectional conversion between OpenAI, Anthropic, and Kiro API formats — covering messages, tool calls, images, system prompts, and streaming events. These converters are used when requests are routed to the Kiro provider (the default). When requests are routed to direct providers (Anthropic, OpenAI, Gemini, Copilot, Qwen), the `Provider` trait implementation handles format translation natively, bypassing the converter pipeline.
+
+This page documents the converter architecture, the unified intermediate representation, and field-level mapping details.
 
 ## Table of Contents
 {: .no_toc .text-delta }
@@ -25,18 +27,28 @@ The conversion system uses a hub-and-spoke pattern with a unified intermediate r
 
 ```mermaid
 flowchart LR
-    subgraph Inbound["Inbound (Request)"]
+    subgraph Input["Client Request"]
         OAI_REQ["OpenAI<br/>ChatCompletionRequest"]
         ANT_REQ["Anthropic<br/>AnthropicMessagesRequest"]
     end
 
-    subgraph Unified["Intermediate Representation"]
-        UM["UnifiedMessage[]<br/>+ system prompt<br/>+ tools"]
+    subgraph Routing["Provider Routing"]
+        REGISTRY["ProviderRegistry<br/><i>resolve_provider()</i>"]
     end
 
-    subgraph Kiro["Kiro Wire Format"]
-        KIRO_REQ["Kiro Payload<br/>(generateAssistantResponse)"]
-        KIRO_RESP["Kiro Event Stream<br/>(KiroEvent[])"]
+    subgraph KiroPath["Kiro Path (format conversion)"]
+        subgraph Unified["Intermediate Representation"]
+            UM["UnifiedMessage[]<br/>+ system prompt<br/>+ tools"]
+        end
+
+        subgraph KiroFmt["Kiro Wire Format"]
+            KIRO_REQ["Kiro Payload<br/>(generateAssistantResponse)"]
+            KIRO_RESP["Kiro Event Stream<br/>(KiroEvent[])"]
+        end
+    end
+
+    subgraph DirectPath["Direct Path (passthrough)"]
+        DIRECT["Provider.execute_openai()<br/>Provider.execute_anthropic()<br/><i>Native API relay</i>"]
     end
 
     subgraph Outbound["Outbound (Response)"]
@@ -44,12 +56,20 @@ flowchart LR
         ANT_RESP["Anthropic SSE / JSON"]
     end
 
-    OAI_REQ -->|"openai_to_kiro.rs"| UM
-    ANT_REQ -->|"anthropic_to_kiro.rs"| UM
+    OAI_REQ --> REGISTRY
+    ANT_REQ --> REGISTRY
+    REGISTRY -->|Kiro| UM
+    REGISTRY -->|"Direct provider"| DIRECT
+
+    OAI_REQ -.->|"openai_to_kiro.rs"| UM
+    ANT_REQ -.->|"anthropic_to_kiro.rs"| UM
     UM -->|"core.rs<br/>build_kiro_history()"| KIRO_REQ
 
     KIRO_RESP -->|"kiro_to_openai.rs"| OAI_RESP
     KIRO_RESP -->|"kiro_to_anthropic.rs"| ANT_RESP
+
+    DIRECT --> OAI_RESP
+    DIRECT --> ANT_RESP
 ```
 
 ---

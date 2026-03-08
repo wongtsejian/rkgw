@@ -1,0 +1,24 @@
+{
+  "id": "ghpages-crt-styling_20260308",
+  "title": "Update GH-Pages Styling and Content to Match Frontend CRT Aesthetic",
+  "type": "feature",
+  "status": "completed",
+  "preset": "frontend-feature",
+  "services": ["docs"],
+  "agents": ["scrum-master", "react-frontend-engineer", "react-frontend-engineer", "react-frontend-engineer", "frontend-qa"],
+  "agent_roles": {
+    "fe-styling": "react-frontend-engineer — SCSS styling, CRT effects, index.md",
+    "fe-docs-arch": "react-frontend-engineer — architecture docs, modules, mermaid diagrams",
+    "fe-docs-ops": "react-frontend-engineer — API reference, config, deployment, user-facing docs"
+  },
+  "branch": "feat/ghpages-crt-styling",
+  "created": "2026-03-08T13:30:00.000Z",
+  "updated": "2026-03-08T14:03:00.000Z",
+  "phases": {
+    "1": { "name": "Wave 1: CRT Styling (fe-styling)", "status": "completed", "tasks_total": 6, "tasks_done": 6 },
+    "2": { "name": "Wave 1: Architecture Docs (fe-docs-arch)", "status": "completed", "tasks_total": 4, "tasks_done": 4 },
+    "3": { "name": "Wave 1: Ops & User Docs (fe-docs-ops)", "status": "completed", "tasks_total": 5, "tasks_done": 5 },
+    "4": { "name": "Wave 2: Visual QA (frontend-qa)", "status": "completed", "tasks_total": 3, "tasks_done": 3 }
+  },
+  "commits": []
+}

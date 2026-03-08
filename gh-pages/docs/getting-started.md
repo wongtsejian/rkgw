@@ -27,11 +27,14 @@ Key capabilities:
 - Bidirectional format translation (OpenAI/Anthropic to Kiro and back)
 - Streaming responses via Server-Sent Events (SSE)
 - Two deployment modes: **Proxy-Only Mode** (single user) and **Full Deployment** (multi-user)
+- Multi-provider support: Kiro (default), GitHub Copilot, and Qwen Coder — with per-user provider priority
 - Multi-user support with Google SSO and per-user API keys (Full Deployment)
 - Role-based access control (Admin / User)
 - Automatic TLS via Let's Encrypt (certbot + nginx)
 - Web dashboard for configuration, monitoring, and log streaming
-- Per-user Kiro credential management with automatic token refresh
+- Content guardrails via AWS Bedrock with CEL rule engine
+- MCP Gateway for connecting external tool servers
+- Per-user credential management with automatic token refresh
 - Model alias resolution (use familiar model names like `claude-sonnet-4`)
 
 ---
@@ -176,6 +179,14 @@ POSTGRES_PASSWORD=your_secure_password_here
 GOOGLE_CLIENT_ID=your-google-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-google-client-secret
 GOOGLE_CALLBACK_URL=https://gateway.example.com/_ui/api/auth/google/callback
+
+# GitHub Copilot OAuth (optional)
+# GITHUB_COPILOT_CLIENT_ID=
+# GITHUB_COPILOT_CLIENT_SECRET=
+# GITHUB_COPILOT_CALLBACK_URL=https://gateway.example.com/_ui/api/copilot/callback
+
+# Qwen Coder OAuth (optional — device flow, no secret required)
+# QWEN_OAUTH_CLIENT_ID=f0304373b74a44d2b584a3fb70ca9e56
 ```
 
 ### Step 3: Provision TLS certificates
@@ -226,9 +237,15 @@ Navigate to `https://your-domain.com/_ui/` in your browser.
 
 Click **Sign in with Google** to authenticate via Google SSO. The first user to sign in is automatically granted the **Admin** role.
 
-### Step 3: Add Kiro credentials
+### Step 3: Add provider credentials
 
-After signing in, you'll be prompted to add your Kiro (AWS) credentials. The setup wizard guides you through the OAuth device code flow to authenticate with AWS SSO and store a refresh token.
+After signing in, navigate to the **Profile** page to connect your AI provider accounts. The gateway supports multiple providers:
+
+- **Kiro (AWS)** — Default provider. Uses an OAuth device code flow to authenticate with AWS SSO and store a refresh token.
+- **GitHub Copilot** (optional) — Connect via GitHub OAuth. Requires `GITHUB_COPILOT_CLIENT_ID`, `GITHUB_COPILOT_CLIENT_SECRET`, and `GITHUB_COPILOT_CALLBACK_URL` in `.env`.
+- **Qwen Coder** (optional) — Connect via device code flow. Requires `QWEN_OAUTH_CLIENT_ID` in `.env` (a default public client ID is provided).
+
+Each user manages their own provider credentials and can set a priority order for provider fallback.
 
 ### Step 4: Create an API key
 
@@ -263,8 +280,8 @@ sequenceDiagram
     GW->>DB: Create admin user
     GW-->>User: Session cookie — redirect to dashboard
 
-    User->>GW: Add Kiro credentials (device code flow)
-    GW->>DB: Save refresh token
+    User->>GW: Add provider credentials (Kiro, Copilot, Qwen)
+    GW->>DB: Save refresh tokens
 
     User->>GW: Create personal API key
     GW->>DB: Save API key (SHA-256 hashed)
@@ -273,8 +290,8 @@ sequenceDiagram
 
     User->>Nginx: POST /v1/chat/completions
     Nginx->>GW: Proxy (plain HTTP)
-    GW->>GW: Validate API key → find user → get Kiro creds
-    GW->>GW: Convert OpenAI → Kiro format
+    GW->>GW: Validate API key → find user → get provider creds
+    GW->>GW: Convert OpenAI → provider format
     GW-->>User: SSE stream (Kiro → OpenAI format)
 ```
 
@@ -339,11 +356,11 @@ curl -X POST https://your-domain.com/v1/messages \
 
 Open `https://your-domain.com/_ui/` to see:
 
-- Real-time request metrics (latency, token counts)
-- System resource usage
-- Live log viewer
-- Configuration management
-- User and API key management
+- Profile page with provider credential management (Kiro, Copilot, Qwen)
+- Configuration management (admin-only)
+- MCP client management (admin-only)
+- Content guardrails configuration (admin-only)
+- User and API key management (admin-only)
 
 ---
 

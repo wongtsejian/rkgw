@@ -99,6 +99,14 @@ POSTGRES_PASSWORD=change-me
 GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=your-client-secret
 GOOGLE_CALLBACK_URL=https://gateway.example.com/_ui/api/auth/google/callback
+
+# Optional: GitHub Copilot OAuth
+# GITHUB_COPILOT_CLIENT_ID=
+# GITHUB_COPILOT_CLIENT_SECRET=
+# GITHUB_COPILOT_CALLBACK_URL=https://gateway.example.com/_ui/api/copilot/callback
+
+# Optional: Qwen Coder (device flow)
+# QWEN_OAUTH_CLIENT_ID=f0304373b74a44d2b584a3fb70ca9e56
 ```
 
 You need a **Google OAuth Client ID** from the [Google Cloud Console](https://console.cloud.google.com/apis/credentials) with the redirect URI set to your callback URL above.
@@ -138,7 +146,7 @@ Server listening on http://0.0.0.0:8000
 Open `https://your-domain.com/_ui/` in your browser.
 
 1. Click **Sign in with Google** — the first user gets the Admin role
-2. Add your **Kiro credentials** via the AWS SSO device code flow
+2. Connect your **provider credentials** on the Profile page (Kiro via AWS SSO device code flow, optionally GitHub Copilot or Qwen Coder)
 3. Create a **personal API key** in the API Keys section
 
 ### 5. Verify it works

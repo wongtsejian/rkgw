@@ -35,12 +35,14 @@ sequenceDiagram
     participant GuardrailEngine as Guardrails Engine
     participant McpMgr as MCP Manager
     participant Resolver as Model Resolver
+    participant Registry as ProviderRegistry
     participant Converter as Converter
     participant TokenCount as Tokenizer
     participant Truncation as Truncation Recovery
     participant AuthMgr as AuthManager
     participant HTTP as KiroHttpClient
     participant KiroAPI as Kiro API
+    participant DirectAPI as Direct Provider API
     participant StreamParser as Stream Parser
     participant ThinkParser as Thinking Parser
     participant OutConverter as Output Converter
@@ -84,65 +86,85 @@ sequenceDiagram
     Resolver->>Resolver: Normalize → check hidden models → check cache
     Resolver-->>Handler: ModelResolution {internal_id, source, is_verified}
 
+    Handler->>Registry: resolve_provider(user_id, model, config_db)
+    Registry->>Registry: Check credential cache (5-min TTL)
+    alt Cache miss
+        Registry->>Registry: Load user provider tokens from DB
+        Registry->>Registry: Select provider by priority + model match
+    end
+    Registry-->>Handler: ProviderCredentials {provider, access_token, base_url}
+
     opt MCP enabled
         Handler->>McpMgr: get_available_tools(request_headers)
         McpMgr-->>Handler: MCP tools (namespaced as clientName_toolName)
         Handler->>Handler: Inject MCP tools into request tool list
     end
 
-    Handler->>Truncation: Inject recovery messages (if enabled)
-    Handler->>Converter: Convert to Kiro format
-    Converter->>Converter: Extract system prompt
-    Converter->>Converter: Convert messages to UnifiedMessage
-    Converter->>Converter: Convert tools (if any)
-    Converter->>Converter: Build Kiro payload JSON
-    Converter-->>Handler: KiroPayload
+    alt Kiro provider (default)
+        Handler->>Truncation: Inject recovery messages (if enabled)
+        Handler->>Converter: Convert to Kiro format
+        Converter->>Converter: Extract system prompt
+        Converter->>Converter: Convert messages to UnifiedMessage
+        Converter->>Converter: Convert tools (if any)
+        Converter->>Converter: Build Kiro payload JSON
+        Converter-->>Handler: KiroPayload
 
-    Handler->>TokenCount: Count input tokens
-    Handler->>AuthMgr: Get per-user access token
-    AuthMgr->>AuthMgr: Check kiro_token_cache (4-min TTL)
-    alt Token expired or missing
-        AuthMgr->>AuthMgr: refresh_aws_sso_oidc()
-    end
-    AuthMgr-->>Handler: Valid access token
-
-    Handler->>HTTP: POST /generateAssistantResponse
-    HTTP->>KiroAPI: Send request with Bearer token
-    alt HTTP error (429, 5xx)
-        HTTP->>HTTP: Exponential backoff + retry
-    end
-    alt 403 Forbidden
-        HTTP->>AuthMgr: Refresh token
-        HTTP->>KiroAPI: Retry with new token
-    end
-    KiroAPI-->>HTTP: AWS Event Stream response
-
-    alt Streaming mode
-        loop For each binary frame
-            HTTP-->>StreamParser: Stream chunk
-            StreamParser->>StreamParser: Parse AWS Event Stream binary
-            StreamParser->>StreamParser: Extract assistantResponseEvent JSON
-            StreamParser->>ThinkParser: Feed content to thinking FSM
-            ThinkParser-->>StreamParser: ThinkingParseResult
-            StreamParser->>OutConverter: Convert KiroEvent to target format
-            OutConverter-->>SSE: Format as SSE event
-            SSE-->>Client: data: {...}\n\n
+        Handler->>TokenCount: Count input tokens
+        Handler->>AuthMgr: Get per-user access token
+        AuthMgr->>AuthMgr: Check kiro_token_cache (4-min TTL)
+        alt Token expired or missing
+            AuthMgr->>AuthMgr: refresh_aws_sso_oidc()
         end
-        SSE-->>Client: data: [DONE] or event: message_stop
-    else Non-streaming mode
-        StreamParser->>StreamParser: Collect all events
-        StreamParser->>OutConverter: Build complete response JSON
-        opt Guardrails enabled (output, non-streaming only)
-            OutConverter->>GuardrailEngine: validate_output(assistant_content, RequestContext)
-            alt Content blocked
-                GuardrailEngine-->>Client: 403 Guardrail Blocked
-            else Content redacted
-                GuardrailEngine-->>OutConverter: GuardrailWarning (redacted content)
-            else Content passed
-                GuardrailEngine-->>OutConverter: OK
+        AuthMgr-->>Handler: Valid access token
+
+        Handler->>HTTP: POST /generateAssistantResponse
+        HTTP->>KiroAPI: Send request with Bearer token
+        alt HTTP error (429, 5xx)
+            HTTP->>HTTP: Exponential backoff + retry
+        end
+        alt 403 Forbidden
+            HTTP->>AuthMgr: Refresh token
+            HTTP->>KiroAPI: Retry with new token
+        end
+        KiroAPI-->>HTTP: AWS Event Stream response
+
+        alt Streaming mode
+            loop For each binary frame
+                HTTP-->>StreamParser: Stream chunk
+                StreamParser->>StreamParser: Parse AWS Event Stream binary
+                StreamParser->>StreamParser: Extract assistantResponseEvent JSON
+                StreamParser->>ThinkParser: Feed content to thinking FSM
+                ThinkParser-->>StreamParser: ThinkingParseResult
+                StreamParser->>OutConverter: Convert KiroEvent to target format
+                OutConverter-->>SSE: Format as SSE event
+                SSE-->>Client: data: {...}\n\n
             end
+            SSE-->>Client: data: [DONE] or event: message_stop
+        else Non-streaming mode
+            StreamParser->>StreamParser: Collect all events
+            StreamParser->>OutConverter: Build complete response JSON
+            opt Guardrails enabled (output, non-streaming only)
+                OutConverter->>GuardrailEngine: validate_output(assistant_content, RequestContext)
+                alt Content blocked
+                    GuardrailEngine-->>Client: 403 Guardrail Blocked
+                else Content redacted
+                    GuardrailEngine-->>OutConverter: GuardrailWarning (redacted content)
+                else Content passed
+                    GuardrailEngine-->>OutConverter: OK
+                end
+            end
+            OutConverter-->>Client: Single JSON response
         end
-        OutConverter-->>Client: Single JSON response
+
+    else Direct provider (Anthropic, OpenAI, Gemini, Copilot, Qwen)
+        Handler->>DirectAPI: Relay request with provider credentials
+        alt Streaming mode
+            DirectAPI-->>SSE: Provider SSE stream
+            SSE-->>Client: Passthrough SSE events
+        else Non-streaming mode
+            DirectAPI-->>Handler: JSON response
+            Handler-->>Client: Relay JSON response
+        end
     end
 ```
 
@@ -220,6 +242,36 @@ flowchart LR
 ```
 
 The resolution result includes the `source` field (`"hidden"`, `"cache"`, or `"passthrough"`) and an `is_verified` flag indicating whether the model was found in a known list.
+
+### Step 6.5: Provider Resolution
+
+The `ProviderRegistry` (`backend/src/providers/registry.rs`) determines which AI provider handles the request based on the user's configured credentials and provider priority:
+
+```mermaid
+flowchart TD
+    REQ["User ID + Model"] --> CACHE_CHECK{"Credential cache<br/>(5-min TTL)?"}
+    CACHE_CHECK -->|Hit| RESOLVE["Select provider by priority"]
+    CACHE_CHECK -->|Miss| LOAD["Load user_provider_tokens from DB"]
+    LOAD --> EXPIRY{"Token expiring<br/>within 5 min?"}
+    EXPIRY -->|Yes| REFRESH["Proactive token refresh<br/>(per-provider mutex)"]
+    REFRESH --> CACHE_STORE["Store in credential cache"]
+    EXPIRY -->|No| CACHE_STORE
+    CACHE_STORE --> RESOLVE
+    RESOLVE --> RESULT["ProviderCredentials<br/>{provider, access_token, base_url}"]
+```
+
+Each user can configure multiple providers with priority ordering. The registry selects the highest-priority provider that has valid credentials. Supported providers:
+
+| Provider | Auth Method | API Endpoint |
+|----------|-----------|-------------|
+| Kiro (default) | AWS SSO OIDC refresh token | `codewhisperer.{region}.amazonaws.com` |
+| Anthropic | OAuth PKCE relay | `api.anthropic.com` |
+| OpenAI | API key (stored) | `api.openai.com` |
+| Gemini | API key (stored) | `generativelanguage.googleapis.com` |
+| Copilot | GitHub OAuth → Copilot token | `api.githubcopilot.com` |
+| Qwen | Device flow (RFC 8628) | `chat.qwen.ai` |
+
+For the Kiro provider, the request continues through the format conversion and streaming pipeline. For direct providers (Anthropic, OpenAI, Gemini, Copilot, Qwen), the `Provider` trait implementation handles the request natively — relaying it to the provider's API and streaming the response back to the client.
 
 ### Step 7: Truncation Recovery Injection
 

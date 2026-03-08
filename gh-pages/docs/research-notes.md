@@ -143,3 +143,42 @@ When the probe can't determine the output cap empirically, use Anthropic's docum
 
 - The binary search uses character count as a proxy for tokens (~4 chars/token). The reported token count comes from the gateway's tiktoken estimate, not Kiro's tokenizer directly.
 - The `auto` model is skipped by default since it's a routing alias, not a real model with its own limits.
+
+---
+
+## Multi-Provider Architecture
+
+### Summary
+
+As of v1.0.8, the gateway supports multiple AI providers beyond the original Kiro (AWS CodeWhisperer) backend. Each user can connect credentials for multiple providers and set a priority order for fallback.
+
+### Supported Providers
+
+| Provider | Auth Method | Env Vars Required | Notes |
+|---|---|---|---|
+| **Kiro** (default) | AWS SSO device code flow | None (built-in) | Original provider, always available |
+| **GitHub Copilot** | GitHub OAuth (authorization code) | `GITHUB_COPILOT_CLIENT_ID`, `GITHUB_COPILOT_CLIENT_SECRET`, `GITHUB_COPILOT_CALLBACK_URL` | Requires a registered GitHub OAuth App |
+| **Qwen Coder** | Device code flow | `QWEN_OAUTH_CLIENT_ID` (optional, default public ID provided) | No client secret required |
+
+### Architecture Decisions
+
+**Per-user provider credentials.** Each user manages their own provider connections via the Profile page. Credentials are stored encrypted in PostgreSQL and cached in memory with TTL-based refresh.
+
+**Provider priority.** Users set a priority order (e.g., Kiro > Copilot > Qwen). When a request arrives, the gateway resolves the user's highest-priority provider with valid credentials and routes the request there. If the top provider fails, it does not automatically fall back mid-request — the user must adjust priority or fix credentials.
+
+**Provider registry pattern.** Providers are registered in `backend/src/providers/registry.rs` using a `ProviderRegistry`. Each provider implements a common trait for credential resolution and request proxying. Adding a new provider requires implementing the trait and registering it.
+
+**OAuth relay for Copilot.** The Copilot OAuth flow uses a relay pattern: the backend initiates the GitHub OAuth redirect, and the callback is handled at `/_ui/api/copilot/callback`. The relay token mechanism (`provider_oauth.rs`) securely bridges the OAuth flow between the browser and backend.
+
+**Device code flow for Qwen.** Similar to the Kiro device code flow, Qwen uses a polling-based device authorization. The frontend polls `/_ui/api/qwen/poll` until the user completes authorization in their browser.
+
+### Impact on Request Flow
+
+The request flow now includes a provider resolution step:
+
+1. API key auth → resolve user
+2. Check user's provider priority list
+3. Get credentials for highest-priority available provider
+4. Convert request to provider's format (Kiro, Copilot, or Qwen)
+5. Proxy to provider API
+6. Convert response back to OpenAI/Anthropic format

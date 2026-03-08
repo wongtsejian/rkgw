@@ -9,7 +9,7 @@ permalink: /architecture/
 # Architecture Overview
 {: .no_toc }
 
-Kiro Gateway is a Rust proxy that exposes OpenAI and Anthropic-compatible APIs, translating requests to the Kiro API (AWS CodeWhisperer) backend. It supports two deployment modes:
+Kiro Gateway is a multi-provider AI proxy that exposes OpenAI and Anthropic-compatible APIs. It routes requests to multiple backend providers — Kiro (AWS CodeWhisperer), Anthropic, OpenAI, Gemini, GitHub Copilot, and Qwen — with per-user credential management and automatic provider selection. It supports two deployment modes:
 
 - **Proxy-Only Mode** (`docker-compose.gateway.yml`) — A single backend container with no database, web UI, or TLS. Uses a single `PROXY_API_KEY` for authentication and an AWS SSO device code flow for Kiro credentials. Best for personal use.
 - **Full Deployment** (`docker-compose.yml`) — Four docker-compose services: PostgreSQL database, Rust backend (plain HTTP), nginx frontend (TLS termination + static SPA), and certbot for automated Let's Encrypt certificate management. Supports multi-user with Google SSO and per-user API keys. Best for teams.
@@ -26,7 +26,7 @@ Both modes share the same Rust backend binary — the deployment mode determines
 
 ## High-Level System Diagram
 
-The gateway sits between AI clients (any tool that speaks the OpenAI or Anthropic protocol) and the Kiro/CodeWhisperer backend on AWS. It handles authentication, format translation, streaming, and extended thinking extraction transparently.
+The gateway sits between AI clients (any tool that speaks the OpenAI or Anthropic protocol) and multiple AI provider backends. It handles authentication, multi-provider routing, format translation, streaming, and extended thinking extraction transparently.
 
 ### Full Deployment
 
@@ -72,6 +72,16 @@ flowchart TB
                 MCP["McpManager<br/><i>Tool servers</i>"]
             end
 
+            subgraph Providers["Provider System"]
+                REGISTRY["ProviderRegistry<br/><i>Per-user credential cache (5-min TTL)</i>"]
+                KIRO_P["KiroProvider<br/><i>Default: AWS CodeWhisperer</i>"]
+                ANTHRO_P["AnthropicProvider<br/><i>Direct Anthropic API</i>"]
+                OPENAI_P["OpenAIProvider<br/><i>Direct OpenAI API</i>"]
+                GEMINI_P["GeminiProvider<br/><i>Direct Gemini API</i>"]
+                COPILOT_P["CopilotProvider<br/><i>GitHub Copilot API</i>"]
+                QWEN_P["QwenProvider<br/><i>Qwen Coder API</i>"]
+            end
+
             subgraph Convert["Format Converters"]
                 O2K["openai_to_kiro"]
                 A2K["anthropic_to_kiro"]
@@ -89,7 +99,7 @@ flowchart TB
         end
 
         CERTBOT["certbot<br/><i>Let's Encrypt renewal (12h)</i>"]
-        PG[("PostgreSQL 16<br/><i>Config + Users + API Keys</i>")]
+        PG[("PostgreSQL 16<br/><i>Config + Users + API Keys<br/>+ Provider Tokens</i>")]
     end
 
     subgraph External["External Services"]
@@ -99,6 +109,11 @@ flowchart TB
         GOOGLE["Google OAuth<br/><i>accounts.google.com</i>"]
         BEDROCK["AWS Bedrock<br/><i>bedrock-runtime.{region}.amazonaws.com</i>"]
         EXTERNAL_TOOLS["External MCP<br/>Tool Servers"]
+        ANTHROPIC_API["Anthropic API<br/><i>api.anthropic.com</i>"]
+        OPENAI_API["OpenAI API<br/><i>api.openai.com</i>"]
+        GEMINI_API["Gemini API<br/><i>generativelanguage.googleapis.com</i>"]
+        COPILOT_API["GitHub Copilot API<br/><i>api.githubcopilot.com</i>"]
+        QWEN_API["Qwen API<br/><i>chat.qwen.ai</i>"]
     end
 
     OAI --> Nginx
@@ -111,12 +126,27 @@ flowchart TB
     AUTH --> ANTHRO
     HEALTH -.-> |no auth| CORS
 
-    OPENAI --> O2K
-    ANTHRO --> A2K
+    OPENAI --> REGISTRY
+    ANTHRO --> REGISTRY
+    REGISTRY --> KIRO_P
+    REGISTRY --> ANTHRO_P
+    REGISTRY --> OPENAI_P
+    REGISTRY --> GEMINI_P
+    REGISTRY --> COPILOT_P
+    REGISTRY --> QWEN_P
+
+    KIRO_P --> O2K
+    KIRO_P --> A2K
     O2K --> CORE_C
     A2K --> CORE_C
     CORE_C --> HTTPC
     HTTPC --> KIRO
+
+    ANTHRO_P --> ANTHROPIC_API
+    OPENAI_P --> OPENAI_API
+    GEMINI_P --> GEMINI_API
+    COPILOT_P --> COPILOT_API
+    QWEN_P --> QWEN_API
 
     KIRO --> PARSER
     PARSER --> THINK
@@ -199,8 +229,6 @@ classDiagram
         +ModelResolver resolver
         +Arc~RwLock~Config~~ config
         +Arc~AtomicBool~ setup_complete
-        +Arc~MetricsCollector~ metrics
-        +Arc~Mutex~VecDeque~LogEntry~~~ log_buffer
         +Option~Arc~ConfigDb~~ config_db
         +Arc~DashMap~ session_cache
         +Arc~DashMap~ api_key_cache
@@ -208,6 +236,16 @@ classDiagram
         +Arc~DashMap~ oauth_pending
         +Option~Arc~McpManager~~ mcp_manager
         +Option~Arc~GuardrailsEngine~~ guardrails_engine
+        +Arc~ProviderRegistry~ provider_registry
+        +Arc~AnthropicProvider~ anthropic_provider
+        +Arc~OpenAIProvider~ openai_provider
+        +Arc~GeminiProvider~ gemini_provider
+        +Arc~CopilotProvider~ copilot_provider
+        +Arc~QwenProvider~ qwen_provider
+        +Arc~DashMap~ provider_oauth_pending
+        +Arc~dyn TokenExchanger~ token_exchanger
+        +Arc~DashMap~ copilot_token_cache
+        +QwenDevicePendingMap qwen_device_pending
     }
 
     class ModelCache {
@@ -252,11 +290,19 @@ classDiagram
         +bool truncation_recovery
     }
 
+    class ProviderRegistry {
+        +Arc~DashMap~ cache
+        +Arc~RefreshLockMap~ refresh_locks
+        +resolve_provider(user_id, model, config_db, token_exchanger) ProviderCredentials
+        +evict_user(user_id)
+    }
+
     AppState --> ModelCache
     AppState --> AuthManager
     AppState --> KiroHttpClient
     AppState --> ModelResolver
     AppState --> Config
+    AppState --> ProviderRegistry
     ModelResolver --> ModelCache
     KiroHttpClient --> AuthManager
 ```
@@ -271,6 +317,10 @@ Key design decisions for AppState:
 - `api_key_cache` maps SHA-256 hashed API keys to `(user_id, key_id)` tuples for fast per-user auth lookup.
 - `kiro_token_cache` stores per-user Kiro access tokens with a 4-minute TTL.
 - `oauth_pending` stores PKCE state during OAuth flows with a 10-minute TTL and 10k capacity cap.
+- `provider_registry` resolves which provider (Kiro, Anthropic, OpenAI, Gemini, Copilot, Qwen) to use for a given user + model, with a 5-minute credential cache and proactive token refresh.
+- `provider_oauth_pending` stores PKCE state for provider OAuth relay flows (Anthropic), separate from Google SSO's `oauth_pending`.
+- `copilot_token_cache` stores per-user Copilot API tokens with base URL and timestamp.
+- `qwen_device_pending` stores in-progress Qwen device flow states (device_code → pending state).
 
 ---
 
@@ -292,6 +342,7 @@ flowchart TD
     MAIN --> LOGCAP["log_capture"]
     MAIN --> GUARDRAILS["guardrails/"]
     MAIN --> MCP["mcp/"]
+    MAIN --> PROVIDERS["providers/"]
 
     ROUTES --> CONVERTERS["converters/"]
     ROUTES --> STREAMING["streaming/"]
@@ -305,6 +356,10 @@ flowchart TD
     ROUTES --> METRICS
     ROUTES --> GUARDRAILS
     ROUTES --> MCP
+    ROUTES --> PROVIDERS
+
+    PROVIDERS --> WEBUI
+    PROVIDERS --> HTTPC
 
     STREAMING --> THINK["thinking_parser"]
     STREAMING --> TRUNC
@@ -348,9 +403,9 @@ flowchart TD
 
 ## Design Principles
 
-### 1. Protocol Translation, Not Reimplementation
+### 1. Multi-Provider Protocol Translation
 
-The gateway does not implement its own LLM logic. It is a pure protocol translator: it accepts requests in OpenAI or Anthropic format, converts them to the Kiro wire format, and converts responses back. The `converters/core.rs` module defines a `UnifiedMessage` type that serves as the intermediate representation between all three formats.
+The gateway does not implement its own LLM logic. It is a protocol translator and provider router: it accepts requests in OpenAI or Anthropic format, resolves the target provider via the `ProviderRegistry`, and either translates to the Kiro wire format (for the default Kiro provider) or relays directly to the provider's native API (Anthropic, OpenAI, Gemini, Copilot, Qwen). The `Provider` trait (`providers/traits.rs`) defines a uniform interface that all providers implement, supporting both OpenAI-format and Anthropic-format inputs. The `converters/core.rs` module defines a `UnifiedMessage` type that serves as the intermediate representation for Kiro-bound requests.
 
 ### 2. TLS at the Edge
 
@@ -407,4 +462,8 @@ Datadog APM is zero-overhead when not configured. When `DD_AGENT_HOST` is set, t
 | `backend/src/log_capture.rs` | Tracing capture layer for web UI SSE log streaming |
 | `backend/src/guardrails/` | Content validation: CEL rule engine, AWS Bedrock guardrails, profiles/rules CRUD |
 | `backend/src/mcp/` | MCP Gateway: tool server connections (HTTP/SSE/STDIO), tool discovery, execution, JSON-RPC server |
+| `backend/src/providers/` | Multi-provider system: `Provider` trait, `ProviderRegistry` (credential cache + routing), implementations for Kiro, Anthropic, OpenAI, Gemini, Copilot, Qwen |
 | `backend/src/web_ui/` | Web UI API: Google SSO, sessions, per-user API keys, Kiro tokens, config, users |
+| `backend/src/web_ui/copilot_auth.rs` | GitHub Copilot OAuth flow (GitHub OAuth → Copilot token exchange) |
+| `backend/src/web_ui/qwen_auth.rs` | Qwen Coder device flow (RFC 8628) |
+| `backend/src/web_ui/provider_oauth.rs` | Provider OAuth relay (Anthropic PKCE flow, token exchange trait) |
