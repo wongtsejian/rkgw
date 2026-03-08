@@ -19,8 +19,10 @@ search.preview_words_before: 5
 search.preview_words_after: 10
 search.tokenizer_separator: /[\s/]+/
 
-# Mermaid diagrams — loaded manually via head_custom.html (not via theme)
-# to support theme toggling and diagram modal features
+# Mermaid diagrams (script loading handled by head_custom.html;
+# _includes/mermaid.html is overridden to prevent theme's default script)
+mermaid:
+  version: "11"
 
 # Heading anchor links
 heading_anchors: true
