@@ -131,9 +131,9 @@ Then open `https://your-domain.com/_ui/` to complete setup via Google SSO.
     <span class="nav-icon">/</span>
     API Reference
   </a>
-  <a href="{{ site.baseurl }}/docs/modules" class="nav-card">
-    <span class="nav-icon">{}</span>
-    Modules
+  <a href="{{ site.baseurl }}/docs/client-setup" class="nav-card">
+    <span class="nav-icon">~</span>
+    Client Setup
   </a>
   <a href="{{ site.baseurl }}/docs/deployment" class="nav-card">
     <span class="nav-icon">$</span>
