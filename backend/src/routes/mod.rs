@@ -603,15 +603,13 @@ async fn health_handler() -> Json<Value> {
 /// GET /v1/models - List available models
 ///
 /// Returns a list of available models in OpenAI format.
-/// Models are loaded from the cache (populated at startup).
+/// Merges Kiro API models (legacy cache) with registry-backed models.
 async fn get_models_handler(State(state): State<AppState>) -> Result<Json<ModelList>, ApiError> {
     tracing::info!("Request to /v1/models");
 
-    // Get all model IDs from cache
-    let model_ids = state.model_cache.get_all_model_ids();
-
-    // Build OpenAI-compatible model list
-    let models: Vec<OpenAIModel> = model_ids
+    // 1. Kiro models from legacy cache
+    let kiro_ids = state.model_cache.get_all_model_ids();
+    let mut models: Vec<OpenAIModel> = kiro_ids
         .into_iter()
         .map(|id| {
             let mut model = OpenAIModel::new(id);
@@ -619,6 +617,25 @@ async fn get_models_handler(State(state): State<AppState>) -> Result<Json<ModelL
             model
         })
         .collect();
+
+    // 2. Registry models (direct providers)
+    let registry_models = state.model_cache.get_all_registry_models();
+    let kiro_set: std::collections::HashSet<String> =
+        models.iter().map(|m| m.id.clone()).collect();
+
+    for rm in registry_models {
+        // Avoid duplicates if a model appears in both caches
+        if kiro_set.contains(&rm.prefixed_id) {
+            continue;
+        }
+        models.push(OpenAIModel {
+            id: rm.prefixed_id,
+            object: "model".to_string(),
+            created: rm.created_at.timestamp(),
+            owned_by: rm.provider_id,
+            description: Some(rm.display_name),
+        });
+    }
 
     Ok(Json(ModelList::new(models)))
 }
