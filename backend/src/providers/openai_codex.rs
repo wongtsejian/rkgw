@@ -1,4 +1,4 @@
-/// OpenAIProvider — direct calls to api.openai.com/v1/chat/completions.
+/// OpenAICodexProvider — direct calls to api.openai.com/v1/chat/completions.
 ///
 /// Handles both OpenAI-format requests (pass-through) and Anthropic-format requests
 /// (converted to OpenAI format before forwarding).
@@ -18,11 +18,11 @@ use crate::streaming::sse::parse_sse_stream;
 
 const OPENAI_API_BASE: &str = "https://api.openai.com";
 
-pub struct OpenAIProvider {
+pub struct OpenAICodexProvider {
     client: reqwest::Client,
 }
 
-impl OpenAIProvider {
+impl OpenAICodexProvider {
     pub fn new() -> Self {
         Self {
             client: reqwest::Client::new(),
@@ -116,7 +116,7 @@ impl OpenAIProvider {
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
             return Err(ApiError::ProviderApiError {
-                provider: "openai".to_string(),
+                provider: "openai_codex".to_string(),
                 status,
                 message: error_text,
             });
@@ -126,16 +126,16 @@ impl OpenAIProvider {
     }
 }
 
-impl Default for OpenAIProvider {
+impl Default for OpenAICodexProvider {
     fn default() -> Self {
         Self::new()
     }
 }
 
 #[async_trait]
-impl Provider for OpenAIProvider {
+impl Provider for OpenAICodexProvider {
     fn id(&self) -> ProviderId {
-        ProviderId::OpenAI
+        ProviderId::OpenAICodex
     }
 
     async fn execute_openai(
@@ -208,15 +208,15 @@ mod tests {
     use crate::providers::types::ProviderCredentials;
 
     #[test]
-    fn test_openai_provider_id() {
-        assert_eq!(OpenAIProvider::new().id(), ProviderId::OpenAI);
+    fn test_openai_codex_provider_id() {
+        assert_eq!(OpenAICodexProvider::new().id(), ProviderId::OpenAICodex);
     }
 
     #[test]
     fn test_completions_url_default() {
-        let provider = OpenAIProvider::new();
+        let provider = OpenAICodexProvider::new();
         let creds = ProviderCredentials {
-            provider: ProviderId::OpenAI,
+            provider: ProviderId::OpenAICodex,
             access_token: "sk-test".to_string(),
             base_url: None,
         };
@@ -233,9 +233,9 @@ mod tests {
 
     #[test]
     fn test_completions_url_custom_base() {
-        let provider = OpenAIProvider::new();
+        let provider = OpenAICodexProvider::new();
         let creds = ProviderCredentials {
-            provider: ProviderId::OpenAI,
+            provider: ProviderId::OpenAICodex,
             access_token: "sk-test".to_string(),
             base_url: Some("https://openrouter.ai/api".to_string()),
         };
@@ -270,7 +270,7 @@ mod tests {
             metadata: None,
         };
 
-        let body = OpenAIProvider::anthropic_to_openai_body(&req);
+        let body = OpenAICodexProvider::anthropic_to_openai_body(&req);
         assert_eq!(body["model"], "claude-sonnet-4");
         assert_eq!(body["max_tokens"], 1000);
         assert_eq!(body["messages"][0]["role"], "user");
@@ -297,7 +297,7 @@ mod tests {
             metadata: None,
         };
 
-        let body = OpenAIProvider::anthropic_to_openai_body(&req);
+        let body = OpenAICodexProvider::anthropic_to_openai_body(&req);
         assert_eq!(body["messages"][0]["role"], "system");
         assert_eq!(body["messages"][0]["content"], "Be helpful");
         assert_eq!(body["messages"][1]["role"], "user");

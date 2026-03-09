@@ -66,7 +66,7 @@ impl CopilotProvider {
     }
 
     /// Convert Anthropic messages format to OpenAI chat completions format.
-    /// Reuses the same logic as OpenAIProvider.
+    /// Reuses the same logic as OpenAICodexProvider.
     fn anthropic_to_openai_body(req: &AnthropicMessagesRequest) -> Value {
         let mut messages: Vec<Value> = Vec::new();
 

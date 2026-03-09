@@ -2,7 +2,7 @@ pub mod anthropic;
 pub mod copilot;
 pub mod gemini;
 pub mod kiro;
-pub mod openai;
+pub mod openai_codex;
 pub mod qwen;
 pub mod registry;
 pub mod traits;

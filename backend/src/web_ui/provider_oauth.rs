@@ -107,7 +107,7 @@ fn gemini_config() -> Result<ProviderOAuthConfig, ApiError> {
     })
 }
 
-fn openai_config() -> ProviderOAuthConfig {
+fn openai_codex_config() -> ProviderOAuthConfig {
     ProviderOAuthConfig {
         client_id: std::env::var("OPENAI_OAUTH_CLIENT_ID")
             .unwrap_or_else(|_| "app_EMoamEEZ73f0CkXaXp7hrann".to_string()),
@@ -124,7 +124,7 @@ fn get_provider_config(provider: &str) -> Result<ProviderOAuthConfig, ApiError> 
     match provider {
         "anthropic" => Ok(anthropic_config()),
         "gemini" => gemini_config(),
-        "openai" => Ok(openai_config()),
+        "openai_codex" => Ok(openai_codex_config()),
         _ => Err(ApiError::ValidationError(format!(
             "Unknown provider: {}",
             provider
@@ -135,9 +135,9 @@ fn get_provider_config(provider: &str) -> Result<ProviderOAuthConfig, ApiError> 
 /// Validate that a provider path param is one of the supported providers.
 fn validate_provider(provider: &str) -> Result<(), ApiError> {
     match provider {
-        "anthropic" | "gemini" | "openai" => Ok(()),
+        "anthropic" | "gemini" | "openai_codex" => Ok(()),
         _ => Err(ApiError::ValidationError(format!(
-            "Unknown provider: {}. Must be one of: anthropic, gemini, openai",
+            "Unknown provider: {}. Must be one of: anthropic, gemini, openai_codex",
             provider
         ))),
     }
@@ -518,7 +518,7 @@ async fn providers_status(
     let connected_map: std::collections::HashMap<String, String> = connected.into_iter().collect();
 
     let mut providers = serde_json::Map::new();
-    for pid in &["anthropic", "gemini", "openai"] {
+    for pid in &["anthropic", "gemini", "openai_codex"] {
         let email = connected_map.get(*pid).cloned();
         let connected = email.is_some();
         providers.insert(
@@ -700,7 +700,7 @@ async fn relay_script(
 
     // Provider-specific extra params
     match provider.as_str() {
-        "openai" => {
+        "openai_codex" => {
             auth_url.push_str(
                 "&prompt=login&id_token_add_organizations=true&codex_cli_simplified_flow=true",
             );
@@ -941,7 +941,7 @@ mod tests {
     fn test_validate_provider_valid() {
         assert!(validate_provider("anthropic").is_ok());
         assert!(validate_provider("gemini").is_ok());
-        assert!(validate_provider("openai").is_ok());
+        assert!(validate_provider("openai_codex").is_ok());
     }
 
     #[test]
@@ -1028,7 +1028,7 @@ mod tests {
         std::env::set_var("GEMINI_OAUTH_CLIENT_ID", "test-id");
         std::env::set_var("GEMINI_OAUTH_CLIENT_SECRET", "test-secret");
         assert!(get_provider_config("gemini").is_ok());
-        assert!(get_provider_config("openai").is_ok());
+        assert!(get_provider_config("openai_codex").is_ok());
         assert!(get_provider_config("unknown").is_err());
     }
 
@@ -1038,7 +1038,7 @@ mod tests {
         std::env::set_var("GEMINI_OAUTH_CLIENT_ID", "test-id");
         std::env::set_var("GEMINI_OAUTH_CLIENT_SECRET", "test-secret");
         assert_eq!(get_provider_config("gemini").unwrap().port, 8085);
-        assert_eq!(get_provider_config("openai").unwrap().port, 1455);
+        assert_eq!(get_provider_config("openai_codex").unwrap().port, 1455);
     }
 
     #[test]
@@ -1154,7 +1154,7 @@ mod tests {
     #[test]
     fn test_providers_status_response_structure() {
         let mut providers = serde_json::Map::new();
-        for pid in &["anthropic", "gemini", "openai"] {
+        for pid in &["anthropic", "gemini", "openai_codex"] {
             providers.insert(
                 pid.to_string(),
                 serde_json::to_value(ProviderStatusInfo {
@@ -1179,7 +1179,7 @@ mod tests {
             "user@anthropic.com"
         );
         assert!(!json["providers"]["gemini"]["connected"].as_bool().unwrap());
-        assert!(!json["providers"]["openai"]["connected"].as_bool().unwrap());
+        assert!(!json["providers"]["openai_codex"]["connected"].as_bool().unwrap());
     }
 
     #[test]
@@ -1244,9 +1244,9 @@ mod tests {
         );
 
         let entry = pending.get("token-y").unwrap();
-        // Request comes in on /providers/openai/relay but token was for anthropic
+        // Request comes in on /providers/openai_codex/relay but token was for anthropic
         assert_ne!(
-            entry.provider, "openai",
+            entry.provider, "openai_codex",
             "Provider mismatch should be detected"
         );
         assert_eq!(entry.provider, "anthropic");

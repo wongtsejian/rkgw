@@ -11,8 +11,8 @@ pub enum ProviderId {
     Kiro,
     #[serde(rename = "anthropic")]
     Anthropic,
-    #[serde(rename = "openai")]
-    OpenAI,
+    #[serde(rename = "openai_codex")]
+    OpenAICodex,
     #[serde(rename = "gemini")]
     Gemini,
     #[serde(rename = "copilot")]
@@ -27,7 +27,7 @@ impl ProviderId {
         match self {
             ProviderId::Kiro => "kiro",
             ProviderId::Anthropic => "anthropic",
-            ProviderId::OpenAI => "openai",
+            ProviderId::OpenAICodex => "openai_codex",
             ProviderId::Gemini => "gemini",
             ProviderId::Copilot => "copilot",
             ProviderId::Qwen => "qwen",
@@ -48,7 +48,7 @@ impl std::str::FromStr for ProviderId {
         match s {
             "kiro" => Ok(ProviderId::Kiro),
             "anthropic" => Ok(ProviderId::Anthropic),
-            "openai" => Ok(ProviderId::OpenAI),
+            "openai_codex" => Ok(ProviderId::OpenAICodex),
             "gemini" => Ok(ProviderId::Gemini),
             "copilot" => Ok(ProviderId::Copilot),
             "qwen" => Ok(ProviderId::Qwen),
@@ -95,7 +95,7 @@ mod tests {
     fn test_provider_id_as_str() {
         assert_eq!(ProviderId::Kiro.as_str(), "kiro");
         assert_eq!(ProviderId::Anthropic.as_str(), "anthropic");
-        assert_eq!(ProviderId::OpenAI.as_str(), "openai");
+        assert_eq!(ProviderId::OpenAICodex.as_str(), "openai_codex");
         assert_eq!(ProviderId::Gemini.as_str(), "gemini");
         assert_eq!(ProviderId::Copilot.as_str(), "copilot");
         assert_eq!(ProviderId::Qwen.as_str(), "qwen");
@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn test_provider_id_display() {
         assert_eq!(ProviderId::Anthropic.to_string(), "anthropic");
-        assert_eq!(ProviderId::OpenAI.to_string(), "openai");
+        assert_eq!(ProviderId::OpenAICodex.to_string(), "openai_codex");
         assert_eq!(ProviderId::Copilot.to_string(), "copilot");
         assert_eq!(ProviderId::Qwen.to_string(), "qwen");
     }
@@ -117,7 +117,7 @@ mod tests {
             ProviderId::from_str("anthropic").unwrap(),
             ProviderId::Anthropic
         );
-        assert_eq!(ProviderId::from_str("openai").unwrap(), ProviderId::OpenAI);
+        assert_eq!(ProviderId::from_str("openai_codex").unwrap(), ProviderId::OpenAICodex);
         assert_eq!(ProviderId::from_str("gemini").unwrap(), ProviderId::Gemini);
         assert_eq!(
             ProviderId::from_str("copilot").unwrap(),
@@ -144,8 +144,8 @@ mod tests {
 
     #[test]
     fn test_provider_id_deserialize() {
-        let id: ProviderId = serde_json::from_str("\"openai\"").unwrap();
-        assert_eq!(id, ProviderId::OpenAI);
+        let id: ProviderId = serde_json::from_str("\"openai_codex\"").unwrap();
+        assert_eq!(id, ProviderId::OpenAICodex);
 
         let id: ProviderId = serde_json::from_str("\"copilot\"").unwrap();
         assert_eq!(id, ProviderId::Copilot);
@@ -171,7 +171,7 @@ mod tests {
         for id in [
             ProviderId::Kiro,
             ProviderId::Anthropic,
-            ProviderId::OpenAI,
+            ProviderId::OpenAICodex,
             ProviderId::Gemini,
             ProviderId::Copilot,
             ProviderId::Qwen,
@@ -263,7 +263,7 @@ mod tests {
     fn test_provider_id_qwen_not_equal_to_others() {
         assert_ne!(ProviderId::Qwen, ProviderId::Kiro);
         assert_ne!(ProviderId::Qwen, ProviderId::Anthropic);
-        assert_ne!(ProviderId::Qwen, ProviderId::OpenAI);
+        assert_ne!(ProviderId::Qwen, ProviderId::OpenAICodex);
         assert_ne!(ProviderId::Qwen, ProviderId::Gemini);
         assert_ne!(ProviderId::Qwen, ProviderId::Copilot);
     }

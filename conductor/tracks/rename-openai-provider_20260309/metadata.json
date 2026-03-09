@@ -2,7 +2,7 @@
   "id": "rename-openai-provider_20260309",
   "title": "Rename OpenAI Provider to OpenAI Codex",
   "type": "refactor",
-  "status": "planned",
+  "status": "completed",
   "preset": "fullstack",
   "services": ["backend", "frontend"],
   "agents": ["rust-backend-engineer", "react-frontend-engineer"],

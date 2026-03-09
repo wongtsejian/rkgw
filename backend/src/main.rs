@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
         mcp_manager: None,
         provider_registry: Arc::new(providers::registry::ProviderRegistry::new()),
         anthropic_provider: Arc::new(providers::anthropic::AnthropicProvider::new()),
-        openai_provider: Arc::new(providers::openai::OpenAIProvider::new()),
+        openai_codex_provider: Arc::new(providers::openai_codex::OpenAICodexProvider::new()),
         gemini_provider: Arc::new(providers::gemini::GeminiProvider::new()),
         copilot_provider: Arc::new(providers::copilot::CopilotProvider::new()),
         qwen_provider: Arc::new(providers::qwen::QwenProvider::new()),

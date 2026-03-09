@@ -31,7 +31,7 @@ use crate::models::openai::{ChatCompletionRequest, ModelList, OpenAIModel};
 use crate::providers::anthropic::AnthropicProvider;
 use crate::providers::copilot::CopilotProvider;
 use crate::providers::gemini::GeminiProvider;
-use crate::providers::openai::OpenAIProvider;
+use crate::providers::openai_codex::OpenAICodexProvider;
 use crate::providers::qwen::QwenProvider;
 use crate::providers::registry::ProviderRegistry;
 use crate::providers::types::{ProviderContext, ProviderCredentials, ProviderId};
@@ -104,7 +104,7 @@ pub struct AppState {
     /// Direct Anthropic API provider
     pub anthropic_provider: Arc<AnthropicProvider>,
     /// Direct OpenAI API provider
-    pub openai_provider: Arc<OpenAIProvider>,
+    pub openai_codex_provider: Arc<OpenAICodexProvider>,
     /// Direct Gemini API provider
     pub gemini_provider: Arc<GeminiProvider>,
     /// Direct Copilot API provider
@@ -443,7 +443,7 @@ async fn handle_direct_openai(
 
     if req.stream {
         let stream = match &provider_id {
-            ProviderId::OpenAI => state.openai_provider.stream_openai(&ctx, req).await?,
+            ProviderId::OpenAICodex => state.openai_codex_provider.stream_openai(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.stream_openai(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.stream_openai(&ctx, req).await?,
             ProviderId::Copilot => state.copilot_provider.stream_openai(&ctx, req).await?,
@@ -460,7 +460,7 @@ async fn handle_direct_openai(
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to build response: {}", e)))
     } else {
         let resp = match &provider_id {
-            ProviderId::OpenAI => state.openai_provider.execute_openai(&ctx, req).await?,
+            ProviderId::OpenAICodex => state.openai_codex_provider.execute_openai(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.execute_openai(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.execute_openai(&ctx, req).await?,
             ProviderId::Copilot => state.copilot_provider.execute_openai(&ctx, req).await?,
@@ -468,7 +468,7 @@ async fn handle_direct_openai(
             ProviderId::Kiro => unreachable!(),
         };
         let body = match provider_id {
-            ProviderId::OpenAI | ProviderId::Copilot | ProviderId::Qwen => resp.body,
+            ProviderId::OpenAICodex | ProviderId::Copilot | ProviderId::Qwen => resp.body,
             ProviderId::Anthropic => anthropic_response_to_openai(&req.model, &resp.body),
             ProviderId::Gemini => serde_json::to_value(
                 crate::converters::gemini_to_openai::gemini_to_openai(&req.model, &resp.body),
@@ -502,7 +502,7 @@ async fn handle_direct_anthropic(
 
     if req.stream {
         let stream = match &provider_id {
-            ProviderId::OpenAI => state.openai_provider.stream_anthropic(&ctx, req).await?,
+            ProviderId::OpenAICodex => state.openai_codex_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Anthropic => state.anthropic_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Gemini => state.gemini_provider.stream_anthropic(&ctx, req).await?,
             ProviderId::Copilot => state.copilot_provider.stream_anthropic(&ctx, req).await?,
@@ -519,7 +519,7 @@ async fn handle_direct_anthropic(
             .map_err(|e| ApiError::Internal(anyhow::anyhow!("Failed to build response: {}", e)))
     } else {
         let resp = match &provider_id {
-            ProviderId::OpenAI => state.openai_provider.execute_anthropic(&ctx, req).await?,
+            ProviderId::OpenAICodex => state.openai_codex_provider.execute_anthropic(&ctx, req).await?,
             ProviderId::Anthropic => {
                 state
                     .anthropic_provider
@@ -533,7 +533,7 @@ async fn handle_direct_anthropic(
         };
         let body = match provider_id {
             ProviderId::Anthropic => resp.body,
-            ProviderId::OpenAI | ProviderId::Copilot | ProviderId::Qwen => {
+            ProviderId::OpenAICodex | ProviderId::Copilot | ProviderId::Qwen => {
                 openai_response_to_anthropic(&req.model, &resp.body)
             }
             ProviderId::Gemini => serde_json::to_value(
@@ -1192,7 +1192,7 @@ mod tests {
             mcp_manager: None,
             provider_registry: Arc::new(ProviderRegistry::new()),
             anthropic_provider: Arc::new(AnthropicProvider::new()),
-            openai_provider: Arc::new(OpenAIProvider::new()),
+            openai_codex_provider: Arc::new(OpenAICodexProvider::new()),
             gemini_provider: Arc::new(GeminiProvider::new()),
             copilot_provider: Arc::new(CopilotProvider::new()),
             qwen_provider: Arc::new(QwenProvider::new()),

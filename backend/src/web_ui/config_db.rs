@@ -190,6 +190,17 @@ impl ConfigDb {
             self.migrate_to_v10().await?;
         }
 
+        // Re-read max version after v10 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 11 {
+            self.migrate_to_v11().await?;
+        }
+
         Ok(())
     }
 
@@ -1698,6 +1709,107 @@ impl ConfigDb {
         Ok(())
     }
 
+    async fn migrate_to_v11(&self) -> Result<()> {
+        tracing::info!("Running database migration to version 11 (rename openai → openai_codex)...");
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin v11 migration transaction")?;
+
+        // ── Rename provider_id data in all tables ──────────────────
+
+        sqlx::query("UPDATE user_provider_keys SET provider_id = 'openai_codex' WHERE provider_id = 'openai'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to rename provider_id in user_provider_keys")?;
+
+        sqlx::query("UPDATE user_provider_tokens SET provider_id = 'openai_codex' WHERE provider_id = 'openai'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to rename provider_id in user_provider_tokens")?;
+
+        sqlx::query("UPDATE user_provider_priority SET provider_id = 'openai_codex' WHERE provider_id = 'openai'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to rename provider_id in user_provider_priority")?;
+
+        sqlx::query("UPDATE model_routes SET provider_id = 'openai_codex' WHERE provider_id = 'openai'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to rename provider_id in model_routes")?;
+
+        // ── Recreate CHECK constraints with 'openai_codex' ─────────
+
+        // user_provider_keys
+        sqlx::query(
+            "ALTER TABLE user_provider_keys
+             DROP CONSTRAINT IF EXISTS user_provider_keys_provider_id_check",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to drop user_provider_keys CHECK constraint")?;
+
+        sqlx::query(
+            "ALTER TABLE user_provider_keys
+             ADD CONSTRAINT user_provider_keys_provider_id_check
+             CHECK (provider_id IN ('anthropic', 'openai_codex', 'gemini'))",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add user_provider_keys CHECK constraint")?;
+
+        // user_provider_tokens
+        sqlx::query(
+            "ALTER TABLE user_provider_tokens
+             DROP CONSTRAINT IF EXISTS user_provider_tokens_provider_id_check",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to drop user_provider_tokens CHECK constraint")?;
+
+        sqlx::query(
+            "ALTER TABLE user_provider_tokens
+             ADD CONSTRAINT user_provider_tokens_provider_id_check
+             CHECK (provider_id IN ('anthropic', 'gemini', 'openai_codex', 'qwen'))",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add user_provider_tokens CHECK constraint")?;
+
+        // model_routes
+        sqlx::query(
+            "ALTER TABLE model_routes
+             DROP CONSTRAINT IF EXISTS model_routes_provider_id_check",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to drop model_routes CHECK constraint")?;
+
+        sqlx::query(
+            "ALTER TABLE model_routes
+             ADD CONSTRAINT model_routes_provider_id_check
+             CHECK (provider_id IN ('kiro', 'anthropic', 'openai_codex', 'gemini', 'copilot', 'qwen'))",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add model_routes CHECK constraint")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(11_i32)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to record schema version 11")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit v11 migration")?;
+
+        tracing::info!("Database migration to version 11 complete");
+        Ok(())
+    }
+
     // ── Copilot Tokens ────────────────────────────────────────────
 
     /// Upsert a user's Copilot tokens (GitHub OAuth + Copilot bearer).
@@ -2776,7 +2888,7 @@ mod tests {
 
         db.upsert_user_provider_token(
             user_id,
-            "openai",
+            "openai_codex",
             "access_1",
             "refresh_old",
             expires,
@@ -2787,7 +2899,7 @@ mod tests {
 
         db.upsert_user_provider_token(
             user_id,
-            "openai",
+            "openai_codex",
             "access_2",
             "refresh_new",
             expires,
@@ -2797,7 +2909,7 @@ mod tests {
         .unwrap();
 
         let (_, refresh, _, _) = db
-            .get_user_provider_token(user_id, "openai")
+            .get_user_provider_token(user_id, "openai_codex")
             .await
             .unwrap()
             .unwrap();
@@ -2886,7 +2998,7 @@ mod tests {
         )
         .await
         .unwrap();
-        db.upsert_user_provider_token(user_id, "openai", "a2", "r2", expires, "me@openai.com")
+        db.upsert_user_provider_token(user_id, "openai_codex", "a2", "r2", expires, "me@openai.com")
             .await
             .unwrap();
 
@@ -2902,7 +3014,7 @@ mod tests {
         );
         assert_eq!(
             providers[1],
-            ("openai".to_string(), "me@openai.com".to_string())
+            ("openai_codex".to_string(), "me@openai.com".to_string())
         );
     }
 

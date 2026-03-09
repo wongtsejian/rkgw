@@ -58,7 +58,7 @@ impl ProviderRegistry {
             || model.starts_with("o4-")
             || model.starts_with("chatgpt-")
         {
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         } else if model.starts_with("gemini-") {
             Some(ProviderId::Gemini)
         } else if model.starts_with("qwen-")
@@ -298,7 +298,7 @@ impl ProviderRegistry {
     ) {
         let mut creds_map = HashMap::new();
         let mut expires_map = HashMap::new();
-        for provider_str in &["anthropic", "openai", "gemini", "qwen"] {
+        for provider_str in &["anthropic", "openai_codex", "gemini", "qwen"] {
             if let Ok(Some((access_token, _refresh_token, expires_at, _email))) =
                 db.get_user_provider_token(user_id, provider_str).await
             {
@@ -307,7 +307,7 @@ impl ProviderRegistry {
                 if expires_at > now {
                     let (provider, base_url) = match *provider_str {
                         "anthropic" => (ProviderId::Anthropic, None),
-                        "openai" => (ProviderId::OpenAI, None),
+                        "openai_codex" => (ProviderId::OpenAICodex, None),
                         "gemini" => (ProviderId::Gemini, None),
                         "qwen" => {
                             // Load base_url from DB for Qwen (set by device flow)
@@ -400,19 +400,19 @@ mod tests {
     fn test_provider_for_model_openai() {
         assert_eq!(
             ProviderRegistry::provider_for_model("gpt-4o"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
         assert_eq!(
             ProviderRegistry::provider_for_model("o1-mini"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
         assert_eq!(
             ProviderRegistry::provider_for_model("o3-pro"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
         assert_eq!(
             ProviderRegistry::provider_for_model("chatgpt-4o-latest"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
     }
 
@@ -703,7 +703,7 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(())),
         );
         registry.refresh_locks.insert(
-            (uid1, "openai".to_string()),
+            (uid1, "openai_codex".to_string()),
             Arc::new(tokio::sync::Mutex::new(())),
         );
         registry.refresh_locks.insert(
@@ -718,7 +718,7 @@ mod tests {
             .contains_key(&(uid1, "anthropic".to_string())));
         assert!(registry
             .refresh_locks
-            .contains_key(&(uid1, "openai".to_string())));
+            .contains_key(&(uid1, "openai_codex".to_string())));
         assert!(registry
             .refresh_locks
             .contains_key(&(uid2, "anthropic".to_string())));
@@ -825,9 +825,9 @@ mod tests {
     fn test_pick_best_provider_copilot_higher_priority() {
         let mut creds = HashMap::new();
         creds.insert(
-            "openai".to_string(),
+            "openai_codex".to_string(),
             ProviderCredentials {
-                provider: ProviderId::OpenAI,
+                provider: ProviderId::OpenAICodex,
                 access_token: "sk-oai".to_string(),
                 base_url: None,
             },
@@ -840,12 +840,12 @@ mod tests {
                 base_url: Some("https://api.githubcopilot.com".to_string()),
             },
         );
-        // User sets copilot priority=1, openai priority=2 → copilot wins
+        // User sets copilot priority=1, openai_codex priority=2 → copilot wins
         let mut priority = HashMap::new();
         priority.insert("copilot".to_string(), 1);
-        priority.insert("openai".to_string(), 2);
+        priority.insert("openai_codex".to_string(), 2);
         let (provider, c) =
-            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAICodex, &creds, &priority);
         assert_eq!(provider, ProviderId::Copilot);
         assert_eq!(c.unwrap().access_token, "cop-tok");
     }
@@ -883,9 +883,9 @@ mod tests {
     fn test_pick_best_provider_equal_priority_prefers_native() {
         let mut creds = HashMap::new();
         creds.insert(
-            "openai".to_string(),
+            "openai_codex".to_string(),
             ProviderCredentials {
-                provider: ProviderId::OpenAI,
+                provider: ProviderId::OpenAICodex,
                 access_token: "sk-oai".to_string(),
                 base_url: None,
             },
@@ -900,11 +900,11 @@ mod tests {
         );
         // Equal priority → native wins (tie-break)
         let mut priority = HashMap::new();
-        priority.insert("openai".to_string(), 1);
+        priority.insert("openai_codex".to_string(), 1);
         priority.insert("copilot".to_string(), 1);
         let (provider, _) =
-            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
-        assert_eq!(provider, ProviderId::OpenAI);
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAICodex, &creds, &priority);
+        assert_eq!(provider, ProviderId::OpenAICodex);
     }
 
     #[tokio::test]
@@ -964,7 +964,7 @@ mod tests {
         );
         let priority = HashMap::new();
         let (provider, c) =
-            ProviderRegistry::pick_best_provider(&ProviderId::OpenAI, &creds, &priority);
+            ProviderRegistry::pick_best_provider(&ProviderId::OpenAICodex, &creds, &priority);
         assert_eq!(provider, ProviderId::Copilot);
         assert_eq!(c.unwrap().access_token, "cop-tok");
     }
@@ -1052,7 +1052,7 @@ mod tests {
     fn test_provider_for_model_o4_prefix() {
         assert_eq!(
             ProviderRegistry::provider_for_model("o4-mini"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
     }
 
@@ -1116,7 +1116,7 @@ mod tests {
         // "qwen" prefix should NOT match other providers
         assert_ne!(
             ProviderRegistry::provider_for_model("qwen-coder-plus"),
-            Some(ProviderId::OpenAI)
+            Some(ProviderId::OpenAICodex)
         );
         assert_ne!(
             ProviderRegistry::provider_for_model("qwen-coder-plus"),
