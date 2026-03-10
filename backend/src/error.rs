@@ -152,7 +152,6 @@ impl IntoResponse for ApiError {
     }
 }
 
-#[allow(dead_code)]
 enum ErrorFormat {
     Anthropic,
     OpenAi,
@@ -358,7 +357,7 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
 /// Differences from Anthropic format: `"server_error"` instead of `"api_error"` for 5xx,
 /// `"invalid_request_error"` instead of `"request_too_large"` for 413, and
 /// `"param": null, "code": null` fields in every response body.
-pub struct OpenAiApiError(pub ApiError);
+pub struct OpenAiApiError(ApiError);
 
 impl From<ApiError> for OpenAiApiError {
     fn from(e: ApiError) -> Self {
@@ -595,6 +594,7 @@ mod openai_error_tests {
             (429, StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
             (500, StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
             (503, StatusCode::SERVICE_UNAVAILABLE, "server_error"),
+            (529, StatusCode::from_u16(529).unwrap(), "server_error"),
         ];
 
         for &(status_code, expected_status, expected_type) in cases {

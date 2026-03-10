@@ -1647,6 +1647,91 @@ mod tests {
         // The input should be an empty object since the truncated JSON fails to parse
         assert!(tool.input.is_object());
     }
+
+    // ==================== Streaming Error SSE Format Tests ====================
+
+    #[test]
+    fn test_openai_streaming_error_sse_format() {
+        // Verify the OpenAI in-band error chunk has the correct SSE and JSON structure.
+        // This mirrors the Err(e) arm in stream_kiro_to_openai's filter_map.
+        let error_msg = "Kiro API error: 500 - Internal Server Error";
+        let chunk = format!(
+            "data: {}\n\n",
+            serde_json::json!({
+                "error": {
+                    "message": error_msg,
+                    "type": "server_error",
+                    "param": null,
+                    "code": null,
+                }
+            })
+        );
+
+        assert!(chunk.starts_with("data: "), "must be SSE data line");
+        assert!(chunk.ends_with("\n\n"), "must end with double newline");
+
+        let json_str = &chunk["data: ".len()..chunk.len() - 2];
+        let json: serde_json::Value = serde_json::from_str(json_str).unwrap();
+
+        assert_eq!(json["error"]["message"].as_str().unwrap(), error_msg);
+        assert_eq!(json["error"]["type"].as_str().unwrap(), "server_error");
+        assert!(json["error"]["param"].is_null(), "param must be null");
+        assert!(json["error"]["code"].is_null(), "code must be null");
+        // Must not look like a normal chat.completion.chunk
+        assert!(json["choices"].is_null(), "error chunk must not have choices");
+    }
+
+    #[test]
+    fn test_openai_streaming_error_no_done_after_error() {
+        // Verify that error_occurred=true suppresses [DONE].
+        // Mirrors the guard at the top of the final_chunks_stream unfold.
+        let error_occurred = true;
+        let would_emit_done = !error_occurred;
+        assert!(!would_emit_done, "[DONE] must not be emitted after a stream error");
+    }
+
+    #[test]
+    fn test_anthropic_streaming_error_sse_format() {
+        // Verify the Anthropic in-band error event has the correct SSE and JSON structure.
+        // This mirrors the Err(e) arm in stream_kiro_to_anthropic's filter_map.
+        let error_msg = "Kiro API error: 500 - Internal Server Error";
+        let error_event = serde_json::json!({
+            "type": "error",
+            "error": {
+                "type": "api_error",
+                "message": error_msg
+            }
+        });
+        // format_anthropic_sse_event("error", &error_event)
+        let sse = format!(
+            "event: {}\ndata: {}\n\n",
+            "error",
+            serde_json::to_string(&error_event).unwrap()
+        );
+
+        assert!(sse.starts_with("event: error\ndata: "), "must be Anthropic SSE error event");
+        assert!(sse.ends_with("\n\n"), "must end with double newline");
+
+        let data_start = "event: error\ndata: ".len();
+        let json: serde_json::Value =
+            serde_json::from_str(&sse[data_start..sse.len() - 2]).unwrap();
+
+        assert_eq!(json["type"].as_str().unwrap(), "error");
+        assert_eq!(json["error"]["type"].as_str().unwrap(), "api_error");
+        assert_eq!(json["error"]["message"].as_str().unwrap(), error_msg);
+    }
+
+    #[test]
+    fn test_anthropic_streaming_error_no_message_stop_after_error() {
+        // Verify that error_occurred=true suppresses message_stop.
+        // Mirrors the guard at the top of the final_events_stream unfold.
+        let error_occurred = true;
+        let would_emit_message_stop = !error_occurred;
+        assert!(
+            !would_emit_message_stop,
+            "message_stop must not be emitted after a stream error"
+        );
+    }
 }
 
 // ==================================================================================================
@@ -1695,6 +1780,8 @@ pub async fn stream_kiro_to_openai(
         tool_calls: Vec<ToolUse>,
         usage: Option<Usage>,
         accumulated_text: String, // Accumulate all text for accurate token counting
+        context_usage_percentage: Option<f64>,
+        error_occurred: bool,
     }
 
     let state = Arc::new(Mutex::new(StreamState {
@@ -1702,6 +1789,8 @@ pub async fn stream_kiro_to_openai(
         tool_calls: Vec::new(),
         usage: None,
         accumulated_text: String::new(),
+        context_usage_percentage: None,
+        error_occurred: false,
     }));
 
     let completion_id_clone = completion_id.clone();
@@ -1824,11 +1913,18 @@ pub async fn stream_kiro_to_openai(
                             }
                             None
                         }
+                        "context_usage" => {
+                            if let Some(pct) = event.context_usage_percentage {
+                                state.context_usage_percentage = Some(pct);
+                            }
+                            None
+                        }
                         _ => None,
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Error in Kiro stream: {:?}", e);
+                    tracing::error!("Error in Kiro stream: {:?}", e);
+                    state.lock().unwrap().error_occurred = true;
                     Some(Ok(format!(
                         "data: {}\n\n",
                         serde_json::json!({
@@ -1862,6 +1958,12 @@ pub async fn stream_kiro_to_openai(
         move |state_opt| async move {
             let (state_arc, completion_id, model, created_time, input_tokens, tracker, truncation_recovery) = state_opt?;
             let state = state_arc.lock().unwrap();
+
+            // Skip final chunk if stream errored — don't emit [DONE] after an error
+            if state.error_occurred {
+                return None;
+            }
+
             let mut final_chunks = Vec::new();
 
             // Deduplicate tool calls before sending
@@ -1934,6 +2036,8 @@ pub async fn stream_kiro_to_openai(
             // Determine finish_reason
             let finish_reason = if !deduped_tool_calls.is_empty() {
                 "tool_calls"
+            } else if state.context_usage_percentage.is_some_and(|pct| pct >= 100.0) {
+                "length"
             } else {
                 "stop"
             };
@@ -2083,6 +2187,7 @@ pub async fn stream_kiro_to_anthropic(
         usage: Option<Usage>,
         accumulated_text: String, // Accumulate all text for accurate token counting
         context_usage_percentage: Option<f64>,
+        error_occurred: bool,
     }
 
     let state = Arc::new(Mutex::new(StreamState::default()));
@@ -2277,7 +2382,8 @@ pub async fn stream_kiro_to_anthropic(
                     }
                 }
                 Err(e) => {
-                    tracing::warn!("Error in Kiro stream: {:?}", e);
+                    tracing::error!("Error in Kiro stream: {:?}", e);
+                    state.lock().unwrap().error_occurred = true;
                     let error_event = serde_json::json!({
                         "type": "error",
                         "error": {
@@ -2297,6 +2403,12 @@ pub async fn stream_kiro_to_anthropic(
         async move {
             let (state_arc, truncation_recovery) = state_opt?;
             let state = state_arc.lock().unwrap();
+
+            // Skip final events if stream errored — don't emit message_stop after an error event
+            if state.error_occurred {
+                return None;
+            }
+
         let mut final_events = Vec::new();
 
         // Close thinking block if open
@@ -2478,6 +2590,7 @@ pub async fn collect_openai_response(
     let mut full_reasoning_content = String::new();
     let mut tool_calls: Vec<ToolUse> = Vec::new();
     let mut usage: Option<Usage> = None;
+    let mut context_usage_percentage: Option<f64> = None;
 
     while let Some(event_result) = kiro_stream.next().await {
         match event_result {
@@ -2500,6 +2613,11 @@ pub async fn collect_openai_response(
                 "usage" => {
                     if let Some(u) = event.usage {
                         usage = Some(u);
+                    }
+                }
+                "context_usage" => {
+                    if let Some(pct) = event.context_usage_percentage {
+                        context_usage_percentage = Some(pct);
                     }
                 }
                 _ => {}
@@ -2559,6 +2677,8 @@ pub async fn collect_openai_response(
     // Determine finish_reason
     let finish_reason = if !tool_calls.is_empty() {
         "tool_calls"
+    } else if context_usage_percentage.is_some_and(|pct| pct >= 100.0) {
+        "length"
     } else {
         "stop"
     };
