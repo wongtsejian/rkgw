@@ -23,6 +23,11 @@ pub enum ApiError {
     #[allow(clippy::enum_variant_names)]
     KiroApiError { status: u16, message: String },
 
+    /// Upstream rejected the request because the input exceeds the model's context window.
+    /// Clients should compact/truncate their conversation and retry.
+    #[error("Context length exceeded: {0}")]
+    ContextLengthExceeded(String),
+
     /// Configuration error
     #[error("Configuration error: {0}")]
     #[allow(dead_code)]
@@ -321,6 +326,25 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
                 body,
             )
                 .into_response();
+        }
+        ApiError::ContextLengthExceeded(msg) => {
+            let body = match format {
+                ErrorFormat::Anthropic => Json(json!({
+                    "error": {
+                        "message": msg,
+                        "type": "invalid_request_error",
+                    }
+                })),
+                ErrorFormat::OpenAi => Json(json!({
+                    "error": {
+                        "message": msg,
+                        "type": "invalid_request_error",
+                        "param": null,
+                        "code": "context_length_exceeded",
+                    }
+                })),
+            };
+            return (StatusCode::BAD_REQUEST, body).into_response();
         }
         ApiError::Internal(err) => {
             tracing::error!("Internal error: {:?}", err);
