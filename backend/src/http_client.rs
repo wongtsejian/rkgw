@@ -162,7 +162,9 @@ impl KiroHttpClient {
                     );
 
                     // Detect context-window overflow from Kiro/CodeWhisperer
-                    if status.as_u16() == 400 && error_text.contains("CONTENT_LENGTH_EXCEEDS_THRESHOLD") {
+                    if status.as_u16() == 400
+                        && error_text.contains("CONTENT_LENGTH_EXCEEDS_THRESHOLD")
+                    {
                         return Err(ApiError::ContextLengthExceeded(
                             "Input is too long for this model's context window. Please reduce the conversation length and retry.".to_string(),
                         ));

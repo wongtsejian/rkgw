@@ -588,9 +588,28 @@ mod tests {
             top_level_type(ApiError::AuthError("bad".to_string())).await,
             Some("error".to_string())
         );
-        // Early-return path (ContextLengthExceeded)
+        // Early-return paths
         assert_eq!(
             top_level_type(ApiError::ContextLengthExceeded("too long".to_string())).await,
+            Some("error".to_string())
+        );
+        assert_eq!(
+            top_level_type(ApiError::GuardrailBlocked {
+                violations: vec![],
+                processing_time_ms: 0,
+            })
+            .await,
+            Some("error".to_string())
+        );
+        // GuardrailWarning returns 200 OK, so "type": "error" is the only
+        // signal to clients that the response was redacted.
+        assert_eq!(
+            top_level_type(ApiError::GuardrailWarning {
+                violations: vec![],
+                processing_time_ms: 0,
+                redacted_content: String::new(),
+            })
+            .await,
             Some("error".to_string())
         );
     }
@@ -683,5 +702,40 @@ mod openai_error_tests {
         let response = err.into_response();
         assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
         assert_eq!(response.headers().get("retry-after").unwrap(), "42");
+    }
+
+    // OpenAI responses must NOT have a top-level "type" field — OpenAI clients
+    // don't expect it and its presence would break the format contract.
+    #[tokio::test]
+    async fn test_openai_error_no_top_level_type() {
+        async fn has_no_top_level_type(err: OpenAiApiError) -> bool {
+            let response = err.into_response();
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            json["type"].is_null()
+        }
+
+        // Normal path
+        assert!(has_no_top_level_type(OpenAiApiError(ApiError::AuthError("x".into()))).await);
+        // Early-return paths
+        assert!(
+            has_no_top_level_type(OpenAiApiError(ApiError::ContextLengthExceeded("x".into())))
+                .await
+        );
+        assert!(
+            has_no_top_level_type(OpenAiApiError(ApiError::GuardrailBlocked {
+                violations: vec![],
+                processing_time_ms: 0,
+            }))
+            .await
+        );
+        assert!(
+            has_no_top_level_type(OpenAiApiError(ApiError::GuardrailWarning {
+                violations: vec![],
+                processing_time_ms: 0,
+                redacted_content: String::new(),
+            }))
+            .await
+        );
     }
 }
