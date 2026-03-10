@@ -705,7 +705,7 @@ async fn chat_completions_handler(
         if let Some(ref model_id) = stripped_model {
             req.model = model_id.clone();
         }
-        return handle_direct_openai(&state, provider, provider_creds.unwrap(), &req).await;
+        return handle_direct_openai(&state, provider, provider_creds.unwrap(), &req).await.map_err(Into::into);
     }
     // ── End direct provider routing ──────────────────────────────────
 
