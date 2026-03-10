@@ -227,6 +227,7 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
         } => {
             let body = match format {
                 ErrorFormat::Anthropic => Json(json!({
+                    "type": "error",
                     "error": {
                         "message": "Content blocked by guardrail policy",
                         "type": "guardrail_blocked",
@@ -254,6 +255,7 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
         } => {
             let body = match format {
                 ErrorFormat::Anthropic => Json(json!({
+                    "type": "error",
                     "error": {
                         "message": "Content redacted by guardrail",
                         "type": "guardrail_warning",
@@ -330,6 +332,7 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
         ApiError::ContextLengthExceeded(msg) => {
             let body = match format {
                 ErrorFormat::Anthropic => Json(json!({
+                    "type": "error",
                     "error": {
                         "message": msg,
                         "type": "invalid_request_error",
@@ -358,6 +361,7 @@ fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
 
     let body = match format {
         ErrorFormat::Anthropic => Json(json!({
+            "type": "error",
             "error": {
                 "message": message,
                 "type": error_type,
@@ -565,6 +569,30 @@ mod tests {
             assert_eq!(status, expected_status, "status mismatch for {status_code}");
             assert_eq!(error_type, expected_type, "type mismatch for {status_code}");
         }
+    }
+
+    // Verify the Anthropic error envelope: top-level `"type": "error"` must be
+    // present so clients (e.g. Claude Code) can recognise the response and
+    // trigger behaviours like auto-compaction on context-length errors.
+    #[tokio::test]
+    async fn test_anthropic_error_envelope_top_level_type() {
+        async fn top_level_type(err: ApiError) -> Option<String> {
+            let response = err.into_response();
+            let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            json["type"].as_str().map(|s| s.to_string())
+        }
+
+        // Normal path
+        assert_eq!(
+            top_level_type(ApiError::AuthError("bad".to_string())).await,
+            Some("error".to_string())
+        );
+        // Early-return path (ContextLengthExceeded)
+        assert_eq!(
+            top_level_type(ApiError::ContextLengthExceeded("too long".to_string())).await,
+            Some("error".to_string())
+        );
     }
 }
 
