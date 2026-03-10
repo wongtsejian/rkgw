@@ -112,6 +112,7 @@ pub enum ApiError {
     /// Error returned by a direct provider API (Anthropic, OpenAI, Gemini)
     #[error("Provider API error ({provider}): {status} - {message}")]
     #[allow(dead_code)]
+    #[allow(clippy::enum_variant_names)]
     ProviderApiError {
         provider: String,
         status: u16,

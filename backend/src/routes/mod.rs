@@ -787,7 +787,7 @@ async fn chat_completions_handler(
 
     // Convert OpenAI request to Kiro format
     let kiro_payload_result = build_kiro_payload(&request, &conversation_id, &profile_arn, &config)
-        .map_err(|e| ApiError::ValidationError(e))?;
+        .map_err(ApiError::ValidationError)?;
 
     let kiro_payload = kiro_payload_result.payload;
 
