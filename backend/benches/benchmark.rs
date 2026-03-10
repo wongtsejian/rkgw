@@ -5,7 +5,7 @@
 //!   cargo bench --features bench -- standalone -c 10,50,100 -d 30 -s
 
 use clap::{Parser, Subcommand};
-use kiro_gateway::bench::{
+use harbangan::bench::{
     BenchmarkConfig, BenchmarkReport, BenchmarkRunner, MockKiroServer, MockServerConfig,
 };
 

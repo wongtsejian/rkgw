@@ -3,6 +3,7 @@
 // These tests verify the full HTTP stack including routing, middleware,
 // request parsing, and response formatting.
 
+use async_trait::async_trait;
 use axum::{
     body::Body,
     http::{header, Request, StatusCode},
@@ -10,22 +11,49 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::RwLock;
 use tower::ServiceExt;
 
-use kiro_gateway::{
+use harbangan::{
     auth::AuthManager,
     cache::ModelCache,
     config::Config,
+    error::ApiError,
     http_client::KiroHttpClient,
-    metrics::MetricsCollector,
+    providers::{
+        anthropic::AnthropicProvider, copilot::CopilotProvider, gemini::GeminiProvider,
+        openai_codex::OpenAICodexProvider, qwen::QwenProvider, registry::ProviderRegistry,
+    },
     resolver::ModelResolver,
     routes::{self, AppState},
+    web_ui::provider_oauth::{TokenExchangeResult, TokenExchanger},
 };
+
+struct NoopExchanger;
+
+#[async_trait]
+impl TokenExchanger for NoopExchanger {
+    async fn exchange_code(
+        &self,
+        _provider: &str,
+        _code: &str,
+        _state: &str,
+        _pkce_verifier: &str,
+        _redirect_uri: &str,
+    ) -> Result<TokenExchangeResult, ApiError> {
+        unimplemented!("not used in integration tests")
+    }
+
+    async fn refresh_token(
+        &self,
+        _provider: &str,
+        _refresh_token: &str,
+    ) -> Result<TokenExchangeResult, ApiError> {
+        unimplemented!("not used in integration tests")
+    }
+}
 
 // ==================================================================================================
 // Test Helpers
@@ -74,14 +102,15 @@ fn create_test_app_state() -> AppState {
         http_connect_timeout: 30,
         http_request_timeout: 300,
         http_max_retries: 3,
-        debug_mode: kiro_gateway::config::DebugMode::Off,
+        debug_mode: harbangan::config::DebugMode::Off,
         log_level: "info".to_string(),
         tool_description_max_length: 10000,
         fake_reasoning_enabled: true,
         fake_reasoning_max_tokens: 4000,
-        fake_reasoning_handling: kiro_gateway::config::FakeReasoningHandling::AsReasoningContent,
+        fake_reasoning_handling: harbangan::config::FakeReasoningHandling::AsReasoningContent,
         truncation_recovery: true,
         guardrails_enabled: false,
+        default_provider: "kiro".to_string(),
         mcp_enabled: false,
         mcp_tool_execution_timeout: 30,
         mcp_health_check_interval: 10,
@@ -98,8 +127,6 @@ fn create_test_app_state() -> AppState {
         google_client_secret: String::new(),
         google_callback_url: String::new(),
     };
-
-    let metrics = Arc::new(MetricsCollector::new());
 
     // Pre-populate the api_key_cache with our test key hash
     let api_key_cache = Arc::new(dashmap::DashMap::new());
@@ -130,8 +157,6 @@ fn create_test_app_state() -> AppState {
         resolver,
         config: Arc::new(RwLock::new(config)),
         setup_complete: Arc::new(AtomicBool::new(true)),
-        metrics,
-        log_buffer: Arc::new(Mutex::new(VecDeque::new())),
         config_db: None,
         session_cache: Arc::new(dashmap::DashMap::new()),
         api_key_cache,
@@ -139,6 +164,17 @@ fn create_test_app_state() -> AppState {
         oauth_pending: Arc::new(dashmap::DashMap::new()),
         guardrails_engine: None,
         mcp_manager: None,
+        provider_registry: Arc::new(ProviderRegistry::new()),
+        anthropic_provider: Arc::new(AnthropicProvider::new()),
+        openai_codex_provider: Arc::new(OpenAICodexProvider::new()),
+        gemini_provider: Arc::new(GeminiProvider::new()),
+        copilot_provider: Arc::new(CopilotProvider::new()),
+        qwen_provider: Arc::new(QwenProvider::new()),
+        provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
+        token_exchanger: Arc::new(NoopExchanger),
+        copilot_token_cache: Arc::new(dashmap::DashMap::new()),
+        copilot_device_pending: Arc::new(dashmap::DashMap::new()),
+        qwen_device_pending: Arc::new(dashmap::DashMap::new()),
     }
 }
 
