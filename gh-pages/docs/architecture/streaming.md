@@ -258,6 +258,21 @@ data: {"type":"message_stop"}\n\n
 
 For thinking content, a separate content block with type `thinking` is emitted before the text content block.
 
+**Stop reasons** in `message_delta`:
+
+| Value | Condition |
+|-------|-----------|
+| `end_turn` | Normal completion |
+| `tool_use` | Model requested one or more tool calls |
+| `max_tokens` | Kiro reported context window at 100% (`context_usage_percentage >= 100`) — client should compact the conversation |
+
+**Error events** — if an error occurs mid-stream (after the HTTP 200 and `message_start` have already been sent), the gateway emits an Anthropic-format error event instead of dropping the connection:
+
+```
+event: error
+data: {"type":"error","error":{"type":"api_error","message":"..."}}\n\n
+```
+
 ---
 
 ## Truncation Detection and Recovery

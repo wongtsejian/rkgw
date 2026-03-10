@@ -22,7 +22,7 @@ use crate::cache::ModelCache;
 use crate::config::Config;
 use crate::converters::anthropic_to_kiro::build_kiro_payload as build_kiro_payload_anthropic;
 use crate::converters::openai_to_kiro::build_kiro_payload;
-use crate::error::ApiError;
+use crate::error::{ApiError, OpenAiApiError};
 use crate::http_client::KiroHttpClient;
 use crate::middleware;
 use crate::middleware::DEBUG_LOGGER;
@@ -648,7 +648,7 @@ async fn get_models_handler(State(state): State<AppState>) -> Result<Json<ModelL
 async fn chat_completions_handler(
     State(state): State<AppState>,
     raw_request: axum::http::Request<Body>,
-) -> Result<Response, ApiError> {
+) -> Result<Response, OpenAiApiError> {
     // Extract per-user Kiro credentials injected by auth middleware
     let user_creds = raw_request.extensions().get::<UserKiroCreds>().cloned();
 
@@ -671,9 +671,7 @@ async fn chat_completions_handler(
 
     // Validate request
     if request.messages.is_empty() {
-        return Err(ApiError::ValidationError(
-            "messages cannot be empty".to_string(),
-        ));
+        return Err(ApiError::ValidationError("messages cannot be empty".to_string()).into());
     }
 
     // ── Direct provider routing ──────────────────────────────────────

@@ -990,7 +990,7 @@ pub fn build_kiro_history(messages: &[UnifiedMessage], model_id: &str) -> Vec<Va
                 // If no preceding user entry, insert synthetic user first
                 let last_is_user = history
                     .last()
-                    .map_or(false, |h| h.get("userInputMessage").is_some());
+                    .is_some_and(|h| h.get("userInputMessage").is_some());
                 if !last_is_user {
                     debug!("History: orphaned assistant message, adding synthetic user input");
                     history.push(json!({"userInputMessage": synthetic_user_input(model_id)}));

@@ -1827,7 +1827,20 @@ pub async fn stream_kiro_to_openai(
                         _ => None,
                     }
                 }
-                Err(e) => Some(Err(e)),
+                Err(e) => {
+                    tracing::warn!("Error in Kiro stream: {:?}", e);
+                    Some(Ok(format!(
+                        "data: {}\n\n",
+                        serde_json::json!({
+                            "error": {
+                                "message": e.to_string(),
+                                "type": "server_error",
+                                "param": null,
+                                "code": null,
+                            }
+                        })
+                    )))
+                }
             }
         }
     });
@@ -2069,6 +2082,7 @@ pub async fn stream_kiro_to_anthropic(
         tool_calls: Vec<ToolUse>,
         usage: Option<Usage>,
         accumulated_text: String, // Accumulate all text for accurate token counting
+        context_usage_percentage: Option<f64>,
     }
 
     let state = Arc::new(Mutex::new(StreamState::default()));
@@ -2253,10 +2267,26 @@ pub async fn stream_kiro_to_anthropic(
                             }
                             None
                         }
+                        "context_usage" => {
+                            if let Some(pct) = event.context_usage_percentage {
+                                state.context_usage_percentage = Some(pct);
+                            }
+                            None
+                        }
                         _ => None,
                     }
                 }
-                Err(e) => Some(Err(e)),
+                Err(e) => {
+                    tracing::warn!("Error in Kiro stream: {:?}", e);
+                    let error_event = serde_json::json!({
+                        "type": "error",
+                        "error": {
+                            "type": "api_error",
+                            "message": e.to_string()
+                        }
+                    });
+                    Some(Ok(format_anthropic_sse_event("error", &error_event)))
+                }
             }
         }
     });
@@ -2359,6 +2389,8 @@ pub async fn stream_kiro_to_anthropic(
         // Determine stop_reason
         let stop_reason = if !deduped_tool_calls.is_empty() {
             "tool_use"
+        } else if state.context_usage_percentage.is_some_and(|pct| pct >= 100.0) {
+            "max_tokens"
         } else {
             "end_turn"
         };
@@ -2473,7 +2505,7 @@ pub async fn collect_openai_response(
                 _ => {}
             },
             Err(e) => {
-                tracing::warn!("Error in stream: {:?}", e);
+                return Err(e);
             }
         }
     }
@@ -2595,6 +2627,7 @@ pub async fn collect_anthropic_response(
     let mut full_thinking_content = String::new();
     let mut tool_calls: Vec<ToolUse> = Vec::new();
     let mut usage: Option<Usage> = None;
+    let mut context_usage_percentage: Option<f64> = None;
 
     while let Some(event_result) = kiro_stream.next().await {
         match event_result {
@@ -2619,10 +2652,15 @@ pub async fn collect_anthropic_response(
                         usage = Some(u);
                     }
                 }
+                "context_usage" => {
+                    if let Some(pct) = event.context_usage_percentage {
+                        context_usage_percentage = Some(pct);
+                    }
+                }
                 _ => {}
             },
             Err(e) => {
-                tracing::warn!("Error in stream: {:?}", e);
+                return Err(e);
             }
         }
     }
@@ -2678,6 +2716,8 @@ pub async fn collect_anthropic_response(
     // Determine stop_reason
     let stop_reason = if !tool_calls.is_empty() {
         "tool_use"
+    } else if context_usage_percentage.is_some_and(|pct| pct >= 100.0) {
+        "max_tokens"
     } else {
         "end_turn"
     };

@@ -148,62 +148,107 @@ pub enum ApiError {
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let (status, error_type, message) = match self {
-            ApiError::AuthError(msg) => (StatusCode::UNAUTHORIZED, "auth_error", msg),
-            ApiError::InvalidModel(msg) => (StatusCode::BAD_REQUEST, "invalid_model", msg),
-            ApiError::KiroApiError { status, message } => {
-                let status_code =
-                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-                (status_code, "kiro_api_error", message)
-            }
-            ApiError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, "config_error", msg),
-            ApiError::ValidationError(msg) => (StatusCode::BAD_REQUEST, "validation_error", msg),
-            ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, "forbidden", msg),
-            ApiError::SessionExpired => (
-                StatusCode::UNAUTHORIZED,
-                "session_expired",
-                "Session expired".to_string(),
-            ),
-            ApiError::DomainNotAllowed(domain) => (
-                StatusCode::FORBIDDEN,
-                "domain_not_allowed",
-                format!("Email domain '{}' is not in the allowlist", domain),
-            ),
-            ApiError::KiroTokenRequired => (
-                StatusCode::FORBIDDEN,
-                "kiro_token_required",
-                "Set up your Kiro token at /_ui/profile".to_string(),
-            ),
-            ApiError::KiroTokenExpired => (
-                StatusCode::FORBIDDEN,
-                "kiro_token_expired",
-                "Re-authenticate your Kiro token at /_ui/profile".to_string(),
-            ),
-            ApiError::LastAdmin => (
-                StatusCode::CONFLICT,
-                "last_admin",
-                "Cannot remove or demote the last admin user".to_string(),
-            ),
-            ApiError::GuardrailBlocked {
-                ref violations,
-                processing_time_ms,
-            } => {
-                let body = Json(json!({
+        api_error_into_response(self, ErrorFormat::Anthropic)
+    }
+}
+
+#[allow(dead_code)]
+enum ErrorFormat {
+    Anthropic,
+    OpenAi,
+}
+
+fn api_error_into_response(err: ApiError, format: ErrorFormat) -> Response {
+    let server_err = match format {
+        ErrorFormat::Anthropic => "api_error",
+        ErrorFormat::OpenAi => "server_error",
+    };
+
+    let (status, error_type, message) = match err {
+        ApiError::AuthError(msg) => (StatusCode::UNAUTHORIZED, "authentication_error", msg),
+        ApiError::InvalidModel(msg) => (StatusCode::BAD_REQUEST, "invalid_request_error", msg),
+        ApiError::KiroApiError { status, message } => {
+            let status_code =
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            let error_type = match status {
+                400 => "invalid_request_error",
+                401 => "authentication_error",
+                403 => "permission_error",
+                404 => "not_found_error",
+                413 => match format {
+                    ErrorFormat::Anthropic => "request_too_large",
+                    ErrorFormat::OpenAi => "invalid_request_error",
+                },
+                429 => "rate_limit_error",
+                529 => match format {
+                    ErrorFormat::Anthropic => "overloaded_error",
+                    ErrorFormat::OpenAi => server_err,
+                },
+                _ => server_err,
+            };
+            (status_code, error_type, message)
+        }
+        ApiError::ConfigError(msg) => (StatusCode::INTERNAL_SERVER_ERROR, server_err, msg),
+        ApiError::ValidationError(msg) => (StatusCode::BAD_REQUEST, "invalid_request_error", msg),
+        ApiError::Forbidden(msg) => (StatusCode::FORBIDDEN, "permission_error", msg),
+        ApiError::SessionExpired => (
+            StatusCode::UNAUTHORIZED,
+            "authentication_error",
+            "Session expired".to_string(),
+        ),
+        ApiError::DomainNotAllowed(domain) => (
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            format!("Email domain '{}' is not in the allowlist", domain),
+        ),
+        ApiError::KiroTokenRequired => (
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "Set up your Kiro token at /_ui/profile".to_string(),
+        ),
+        ApiError::KiroTokenExpired => (
+            StatusCode::FORBIDDEN,
+            "permission_error",
+            "Re-authenticate your Kiro token at /_ui/profile".to_string(),
+        ),
+        ApiError::LastAdmin => (
+            StatusCode::CONFLICT,
+            "invalid_request_error",
+            "Cannot remove or demote the last admin user".to_string(),
+        ),
+        ApiError::GuardrailBlocked {
+            ref violations,
+            processing_time_ms,
+        } => {
+            let body = match format {
+                ErrorFormat::Anthropic => Json(json!({
                     "error": {
                         "message": "Content blocked by guardrail policy",
                         "type": "guardrail_blocked",
                         "violations": violations,
                         "processing_time_ms": processing_time_ms,
                     }
-                }));
-                return (StatusCode::FORBIDDEN, body).into_response();
-            }
-            ApiError::GuardrailWarning {
-                ref violations,
-                processing_time_ms,
-                ref redacted_content,
-            } => {
-                let body = Json(json!({
+                })),
+                ErrorFormat::OpenAi => Json(json!({
+                    "error": {
+                        "message": "Content blocked by guardrail policy",
+                        "type": "invalid_request_error",
+                        "param": null,
+                        "code": "content_policy_violation",
+                        "violations": violations,
+                        "processing_time_ms": processing_time_ms,
+                    }
+                })),
+            };
+            return (StatusCode::FORBIDDEN, body).into_response();
+        }
+        ApiError::GuardrailWarning {
+            ref violations,
+            processing_time_ms,
+            ref redacted_content,
+        } => {
+            let body = match format {
+                ErrorFormat::Anthropic => Json(json!({
                     "error": {
                         "message": "Content redacted by guardrail",
                         "type": "guardrail_warning",
@@ -211,85 +256,119 @@ impl IntoResponse for ApiError {
                         "processing_time_ms": processing_time_ms,
                         "redacted_content": redacted_content,
                     }
-                }));
-                return (StatusCode::OK, body).into_response();
-            }
-            ApiError::McpConnectionError(msg) => {
-                (StatusCode::BAD_GATEWAY, "mcp_connection_error", msg)
-            }
-            ApiError::McpToolNotFound(msg) => (StatusCode::NOT_FOUND, "mcp_tool_not_found", msg),
-            ApiError::McpToolExecutionError(msg) => {
-                (StatusCode::BAD_GATEWAY, "mcp_tool_execution_error", msg)
-            }
-            ApiError::McpClientNotFound(msg) => {
-                (StatusCode::NOT_FOUND, "mcp_client_not_found", msg)
-            }
-            ApiError::McpProtocolError(msg) => (StatusCode::BAD_GATEWAY, "mcp_protocol_error", msg),
-            ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg),
-            ApiError::ProviderApiError {
-                provider,
-                status,
-                message,
-            } => {
-                let status_code =
-                    StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-                (
-                    status_code,
-                    "provider_api_error",
-                    format!("[{}] {}", provider, message),
-                )
-            }
-            ApiError::ProviderNotConfigured(provider) => (
-                StatusCode::FORBIDDEN,
-                "provider_not_configured",
-                format!(
-                    "No API key configured for provider '{}'. Connect it at /_ui/profile",
-                    provider
-                ),
-            ),
-            ApiError::CopilotAuthError(msg) => (StatusCode::BAD_GATEWAY, "copilot_auth_error", msg),
-            ApiError::CopilotTokenExpired => (
-                StatusCode::FORBIDDEN,
-                "copilot_token_expired",
-                "Copilot token expired. Re-connect at /_ui/profile".to_string(),
-            ),
-            ApiError::RateLimited {
-                ref provider,
-                retry_after_secs,
-            } => {
-                let body = Json(json!({
+                })),
+                ErrorFormat::OpenAi => Json(json!({
                     "error": {
-                        "message": format!("Rate limited for provider '{}'. Retry after {}s.", provider, retry_after_secs),
-                        "type": "rate_limited",
-                        "retry_after": retry_after_secs,
+                        "message": "Content redacted by guardrail",
+                        "type": "invalid_request_error",
+                        "param": null,
+                        "code": "content_policy_warning",
+                        "violations": violations,
+                        "processing_time_ms": processing_time_ms,
+                        "redacted_content": redacted_content,
                     }
-                }));
-                return (
-                    StatusCode::TOO_MANY_REQUESTS,
-                    [("retry-after", retry_after_secs.to_string())],
-                    body,
-                )
-                    .into_response();
-            }
-            ApiError::Internal(err) => {
-                // Log internal errors
-                tracing::error!("Internal error: {:?}", err);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "internal_error",
-                    "Internal server error".to_string(),
-                )
-            }
-        };
+                })),
+            };
+            return (StatusCode::OK, body).into_response();
+        }
+        ApiError::McpConnectionError(msg) => (StatusCode::BAD_GATEWAY, server_err, msg),
+        ApiError::McpToolNotFound(msg) => (StatusCode::NOT_FOUND, "not_found_error", msg),
+        ApiError::McpToolExecutionError(msg) => (StatusCode::BAD_GATEWAY, server_err, msg),
+        ApiError::McpClientNotFound(msg) => (StatusCode::NOT_FOUND, "not_found_error", msg),
+        ApiError::McpProtocolError(msg) => (StatusCode::BAD_GATEWAY, server_err, msg),
+        ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found_error", msg),
+        ApiError::ProviderApiError {
+            provider,
+            status,
+            message,
+        } => {
+            let status_code =
+                StatusCode::from_u16(status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            (
+                status_code,
+                "provider_api_error",
+                format!("[{}] {}", provider, message),
+            )
+        }
+        ApiError::ProviderNotConfigured(provider) => (
+            StatusCode::FORBIDDEN,
+            "provider_not_configured",
+            format!(
+                "No API key configured for provider '{}'. Connect it at /_ui/profile",
+                provider
+            ),
+        ),
+        ApiError::CopilotAuthError(msg) => (StatusCode::BAD_GATEWAY, "copilot_auth_error", msg),
+        ApiError::CopilotTokenExpired => (
+            StatusCode::FORBIDDEN,
+            "copilot_token_expired",
+            "Copilot token expired. Re-connect at /_ui/profile".to_string(),
+        ),
+        ApiError::RateLimited {
+            ref provider,
+            retry_after_secs,
+        } => {
+            let body = Json(json!({
+                "error": {
+                    "message": format!("Rate limited for provider '{}'. Retry after {}s.", provider, retry_after_secs),
+                    "type": "rate_limited",
+                    "retry_after": retry_after_secs,
+                }
+            }));
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                [("retry-after", retry_after_secs.to_string())],
+                body,
+            )
+                .into_response();
+        }
+        ApiError::Internal(err) => {
+            tracing::error!("Internal error: {:?}", err);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                server_err,
+                "Internal server error".to_string(),
+            )
+        }
+    };
 
-        let body = Json(json!({
+    let body = match format {
+        ErrorFormat::Anthropic => Json(json!({
             "error": {
                 "message": message,
                 "type": error_type,
             }
-        }));
+        })),
+        ErrorFormat::OpenAi => Json(json!({
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": null,
+                "code": null,
+            }
+        })),
+    };
 
-        (status, body).into_response()
+    (status, body).into_response()
+}
+
+/// Marker type for the `/v1/chat/completions` handler return type.
+///
+/// Serializes `ApiError` in OpenAI's error format via `api_error_into_response`.
+/// Differences from Anthropic format: `"server_error"` instead of `"api_error"` for 5xx,
+/// `"invalid_request_error"` instead of `"request_too_large"` for 413, and
+/// `"param": null, "code": null` fields in every response body.
+pub struct OpenAiApiError(pub ApiError);
+
+impl From<ApiError> for OpenAiApiError {
+    fn from(e: ApiError) -> Self {
+        OpenAiApiError(e)
+    }
+}
+
+impl IntoResponse for OpenAiApiError {
+    fn into_response(self) -> Response {
+        api_error_into_response(self.0, ErrorFormat::OpenAi)
     }
 }
 
@@ -300,6 +379,16 @@ pub type Result<T> = std::result::Result<T, ApiError>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::body::to_bytes;
+
+    async fn response_error_type(err: ApiError) -> (StatusCode, String) {
+        let response = err.into_response();
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let error_type = json["error"]["type"].as_str().unwrap().to_string();
+        (status, error_type)
+    }
 
     #[test]
     fn test_error_messages() {
@@ -335,140 +424,201 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_error_response_conversion() {
-        let err = ApiError::AuthError("Invalid token".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-        let err = ApiError::InvalidModel("gpt-4".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let err = ApiError::KiroApiError {
-            status: 429,
-            message: "Rate limit".to_string(),
-        };
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    async fn test_auth_error_response() {
+        let (status, error_type) =
+            response_error_type(ApiError::AuthError("Invalid token".to_string())).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(error_type, "authentication_error");
     }
 
     #[tokio::test]
-    async fn test_config_error_response() {
-        let err = ApiError::ConfigError("Bad config".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    async fn test_invalid_model_response() {
+        let (status, error_type) =
+            response_error_type(ApiError::InvalidModel("gpt-4".to_string())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error_type, "invalid_request_error");
     }
 
     #[tokio::test]
     async fn test_validation_error_response() {
-        let err = ApiError::ValidationError("Missing field".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let (status, error_type) =
+            response_error_type(ApiError::ValidationError("Missing field".to_string())).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error_type, "invalid_request_error");
+    }
+
+    #[tokio::test]
+    async fn test_config_error_response() {
+        let (status, error_type) =
+            response_error_type(ApiError::ConfigError("Bad config".to_string())).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error_type, "api_error");
     }
 
     #[tokio::test]
     async fn test_internal_error_response() {
-        let err = ApiError::Internal(anyhow::anyhow!("Unexpected error"));
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        let (status, error_type) =
+            response_error_type(ApiError::Internal(anyhow::anyhow!("Unexpected error"))).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error_type, "api_error");
+    }
+
+    #[tokio::test]
+    async fn test_forbidden_response() {
+        let (status, error_type) =
+            response_error_type(ApiError::Forbidden("Access denied".to_string())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error_type, "permission_error");
+    }
+
+    #[tokio::test]
+    async fn test_session_expired_response() {
+        let (status, error_type) = response_error_type(ApiError::SessionExpired).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(error_type, "authentication_error");
+    }
+
+    #[tokio::test]
+    async fn test_domain_not_allowed_response() {
+        let (status, error_type) =
+            response_error_type(ApiError::DomainNotAllowed("evil.com".to_string())).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error_type, "permission_error");
+    }
+
+    #[tokio::test]
+    async fn test_kiro_token_required_response() {
+        let (status, error_type) = response_error_type(ApiError::KiroTokenRequired).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error_type, "permission_error");
+    }
+
+    #[tokio::test]
+    async fn test_kiro_token_expired_response() {
+        let (status, error_type) = response_error_type(ApiError::KiroTokenExpired).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        assert_eq!(error_type, "permission_error");
+    }
+
+    #[tokio::test]
+    async fn test_last_admin_response() {
+        let (status, error_type) = response_error_type(ApiError::LastAdmin).await;
+        assert_eq!(status, StatusCode::CONFLICT);
+        assert_eq!(error_type, "invalid_request_error");
     }
 
     #[tokio::test]
     async fn test_kiro_api_error_invalid_status() {
-        // Test with an invalid status code (must be >= 1000 to be invalid)
-        // HTTP status codes 100-999 are valid
-        let err = ApiError::KiroApiError {
-            status: 1000, // Invalid HTTP status (out of range)
+        let (status, error_type) = response_error_type(ApiError::KiroApiError {
+            status: 1000,
             message: "Unknown error".to_string(),
-        };
-        let response = err.into_response();
-        // Invalid status codes fall back to 500 Internal Server Error
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        })
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error_type, "api_error");
     }
 
     #[tokio::test]
-    async fn test_kiro_api_error_various_statuses() {
-        // Test 400 Bad Request
-        let err = ApiError::KiroApiError {
-            status: 400,
-            message: "Bad request".to_string(),
-        };
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    async fn test_kiro_api_error_type_mapping() {
+        let cases: &[(u16, StatusCode, &str)] = &[
+            (400, StatusCode::BAD_REQUEST, "invalid_request_error"),
+            (401, StatusCode::UNAUTHORIZED, "authentication_error"),
+            (403, StatusCode::FORBIDDEN, "permission_error"),
+            (404, StatusCode::NOT_FOUND, "not_found_error"),
+            (413, StatusCode::PAYLOAD_TOO_LARGE, "request_too_large"),
+            (429, StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+            (500, StatusCode::INTERNAL_SERVER_ERROR, "api_error"),
+            (503, StatusCode::SERVICE_UNAVAILABLE, "api_error"),
+            (529, StatusCode::from_u16(529).unwrap(), "overloaded_error"),
+        ];
 
-        // Test 403 Forbidden
-        let err = ApiError::KiroApiError {
-            status: 403,
-            message: "Forbidden".to_string(),
-        };
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+        for &(status_code, expected_status, expected_type) in cases {
+            let (status, error_type) = response_error_type(ApiError::KiroApiError {
+                status: status_code,
+                message: "test".to_string(),
+            })
+            .await;
+            assert_eq!(status, expected_status, "status mismatch for {status_code}");
+            assert_eq!(error_type, expected_type, "type mismatch for {status_code}");
+        }
+    }
+}
 
-        // Test 404 Not Found
-        let err = ApiError::KiroApiError {
-            status: 404,
-            message: "Not found".to_string(),
-        };
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+// ==================================================================================================
+// OpenAiApiError tests
+// ==================================================================================================
 
-        // Test 500 Internal Server Error
-        let err = ApiError::KiroApiError {
-            status: 500,
-            message: "Server error".to_string(),
-        };
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+#[cfg(test)]
+mod openai_error_tests {
+    use super::*;
+    use axum::body::to_bytes;
 
-        // Test 503 Service Unavailable
-        let err = ApiError::KiroApiError {
-            status: 503,
-            message: "Service unavailable".to_string(),
-        };
+    async fn openai_response_fields(err: OpenAiApiError) -> (StatusCode, String, bool, bool) {
         let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        let status = response.status();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let error_type = json["error"]["type"].as_str().unwrap().to_string();
+        let has_param_null = json["error"]["param"].is_null();
+        let has_code_null = json["error"]["code"].is_null();
+        (status, error_type, has_param_null, has_code_null)
     }
 
     #[tokio::test]
-    async fn test_forbidden_returns_403() {
-        let err = ApiError::Forbidden("Access denied".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    async fn test_openai_error_has_param_and_code_null() {
+        let (status, error_type, has_param_null, has_code_null) =
+            openai_response_fields(OpenAiApiError(ApiError::AuthError("bad key".to_string())))
+                .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        assert_eq!(error_type, "authentication_error");
+        assert!(has_param_null, "param should be null");
+        assert!(has_code_null, "code should be null");
     }
 
     #[tokio::test]
-    async fn test_session_expired_returns_401() {
-        let err = ApiError::SessionExpired;
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    async fn test_openai_internal_error_uses_server_error() {
+        let (status, error_type, _, _) =
+            openai_response_fields(OpenAiApiError(ApiError::Internal(anyhow::anyhow!("boom"))))
+                .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error_type, "server_error");
     }
 
     #[tokio::test]
-    async fn test_domain_not_allowed_returns_403() {
-        let err = ApiError::DomainNotAllowed("evil.com".to_string());
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    async fn test_openai_kiro_api_error_type_mapping() {
+        let cases: &[(u16, StatusCode, &str)] = &[
+            (400, StatusCode::BAD_REQUEST, "invalid_request_error"),
+            (401, StatusCode::UNAUTHORIZED, "authentication_error"),
+            (403, StatusCode::FORBIDDEN, "permission_error"),
+            (404, StatusCode::NOT_FOUND, "not_found_error"),
+            (413, StatusCode::PAYLOAD_TOO_LARGE, "invalid_request_error"),
+            (429, StatusCode::TOO_MANY_REQUESTS, "rate_limit_error"),
+            (500, StatusCode::INTERNAL_SERVER_ERROR, "server_error"),
+            (503, StatusCode::SERVICE_UNAVAILABLE, "server_error"),
+        ];
+
+        for &(status_code, expected_status, expected_type) in cases {
+            let (status, error_type, has_param_null, has_code_null) =
+                openai_response_fields(OpenAiApiError(ApiError::KiroApiError {
+                    status: status_code,
+                    message: "test".to_string(),
+                }))
+                .await;
+            assert_eq!(status, expected_status, "status mismatch for {status_code}");
+            assert_eq!(error_type, expected_type, "type mismatch for {status_code}");
+            assert!(has_param_null, "param should be null for {status_code}");
+            assert!(has_code_null, "code should be null for {status_code}");
+        }
     }
 
     #[tokio::test]
-    async fn test_kiro_token_required_returns_403() {
-        let err = ApiError::KiroTokenRequired;
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn test_kiro_token_expired_returns_403() {
-        let err = ApiError::KiroTokenExpired;
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::FORBIDDEN);
-    }
-
-    #[tokio::test]
-    async fn test_last_admin_returns_409() {
-        let err = ApiError::LastAdmin;
-        let response = err.into_response();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
+    async fn test_openai_validation_error() {
+        let (status, error_type, _, _) = openai_response_fields(OpenAiApiError(
+            ApiError::ValidationError("bad input".to_string()),
+        ))
+        .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(error_type, "invalid_request_error");
     }
 
     #[tokio::test]

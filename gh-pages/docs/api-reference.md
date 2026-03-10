@@ -75,7 +75,7 @@ If API key authentication fails:
 {
   "error": {
     "message": "Invalid or missing API Key",
-    "type": "auth_error"
+    "type": "authentication_error"
   }
 }
 ```
@@ -740,7 +740,9 @@ All web UI API endpoints are under `/_ui/api/`. See the [Web Dashboard](web-ui.h
 
 ## Error Responses
 
-All errors follow a consistent JSON format:
+Error format depends on which API endpoint you are calling.
+
+### Anthropic format (`/v1/messages`)
 
 ```json
 {
@@ -751,22 +753,58 @@ All errors follow a consistent JSON format:
 }
 ```
 
-### Error Types and Status Codes
+| HTTP Status | Error Type | Description |
+|-------------|-----------|-------------|
+| `400` | `invalid_request_error` | Invalid request body, missing required fields, or invalid parameter values. |
+| `401` | `authentication_error` | Missing or invalid API key, or expired session. |
+| `403` | `permission_error` | Valid credentials but insufficient permissions (e.g. Kiro token not configured, domain not in allowlist). |
+| `404` | `not_found_error` | Requested resource does not exist. |
+| `413` | `request_too_large` | Request body exceeds the upstream size limit. |
+| `429` | `rate_limit_error` | Rate limit exceeded on the upstream Kiro API. |
+| `500` | `api_error` | Unexpected server error or upstream Kiro API 5xx. |
+| `529` | `overloaded_error` | Upstream Kiro API is temporarily overloaded. |
+| `503` | `setup_required` | Initial setup has not been completed. Visit `/_ui/` to configure the gateway. |
+| `403` | `guardrail_blocked` | Content blocked by guardrail policy. Response includes violation details. |
+| `200` | `guardrail_warning` | Content was redacted by guardrail (e.g. PII masking). Includes redacted content. |
+
+Mid-stream errors (after the HTTP 200 and `message_start` have already been sent) are delivered as an Anthropic SSE error event rather than dropping the connection:
+
+```
+event: error
+data: {"type":"error","error":{"type":"api_error","message":"..."}}
+```
+
+### OpenAI format (`/v1/chat/completions`)
+
+```json
+{
+  "error": {
+    "message": "Human-readable error description",
+    "type": "error_type",
+    "param": null,
+    "code": null
+  }
+}
+```
+
+The OpenAI format always includes `"param": null` and `"code": null`. Error type strings follow OpenAI conventions — notably `server_error` (not `api_error`) for 5xx responses, and `invalid_request_error` (not `request_too_large`) for 413:
 
 | HTTP Status | Error Type | Description |
 |-------------|-----------|-------------|
-| `400` | `validation_error` | Invalid request body, missing required fields, or invalid parameter values. |
-| `400` | `invalid_model` | The requested model name could not be resolved. |
-| `401` | `auth_error` | Missing or invalid API key. |
-| `429` | `kiro_api_error` | Rate limit exceeded on the upstream Kiro API. |
-| `500` | `internal_error` | Unexpected server error. The actual error message is logged server-side; clients receive a generic message. |
-| `500` | `config_error` | Server configuration issue (e.g. missing database). |
-| `503` | `setup_required` | Initial setup has not been completed. Visit `/_ui/` to configure the gateway. |
-| Various | `kiro_api_error` | Upstream Kiro API returned an error. The HTTP status is forwarded from the upstream response. |
-| `403` | `guardrail_blocked` | Content blocked by guardrail policy. Response includes violation details. |
-| `200` | `guardrail_warning` | Content was redacted by guardrail (e.g. PII masking). Includes redacted content. |
-| `404` | `mcp_client_not_found` | Referenced MCP client does not exist. |
-| `502` | `mcp_protocol_error` | MCP tool server returned a protocol error. |
+| `400` | `invalid_request_error` | Invalid request body, missing required fields, or invalid parameter values. |
+| `401` | `authentication_error` | Missing or invalid API key, or expired session. |
+| `403` | `permission_error` | Valid credentials but insufficient permissions. |
+| `404` | `not_found_error` | Requested resource does not exist. |
+| `413` | `invalid_request_error` | Request body exceeds the upstream size limit. |
+| `429` | `rate_limit_error` | Rate limit exceeded on the upstream Kiro API. |
+| `500` | `server_error` | Unexpected server error or upstream Kiro API 5xx. |
+| `503` | `server_error` | Upstream service unavailable. |
+
+Mid-stream errors (after the HTTP 200 has already been sent) are delivered as an SSE data chunk rather than dropping the connection:
+
+```
+data: {"error":{"message":"...","type":"server_error","param":null,"code":null}}
+```
 
 ---
 
