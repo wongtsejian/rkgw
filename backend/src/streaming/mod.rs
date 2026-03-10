@@ -1678,7 +1678,10 @@ mod tests {
         assert!(json["error"]["param"].is_null(), "param must be null");
         assert!(json["error"]["code"].is_null(), "code must be null");
         // Must not look like a normal chat.completion.chunk
-        assert!(json["choices"].is_null(), "error chunk must not have choices");
+        assert!(
+            json["choices"].is_null(),
+            "error chunk must not have choices"
+        );
     }
 
     #[test]
@@ -1687,7 +1690,10 @@ mod tests {
         // Mirrors the guard at the top of the final_chunks_stream unfold.
         let error_occurred = true;
         let would_emit_done = !error_occurred;
-        assert!(!would_emit_done, "[DONE] must not be emitted after a stream error");
+        assert!(
+            !would_emit_done,
+            "[DONE] must not be emitted after a stream error"
+        );
     }
 
     #[test]
@@ -1709,7 +1715,10 @@ mod tests {
             serde_json::to_string(&error_event).unwrap()
         );
 
-        assert!(sse.starts_with("event: error\ndata: "), "must be Anthropic SSE error event");
+        assert!(
+            sse.starts_with("event: error\ndata: "),
+            "must be Anthropic SSE error event"
+        );
         assert!(sse.ends_with("\n\n"), "must end with double newline");
 
         let data_start = "event: error\ndata: ".len();

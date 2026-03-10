@@ -348,7 +348,10 @@ async fn test_openai_chat_completions_empty_messages() {
         .as_str()
         .unwrap()
         .contains("messages"));
-    assert_eq!(body["error"]["type"].as_str().unwrap(), "invalid_request_error");
+    assert_eq!(
+        body["error"]["type"].as_str().unwrap(),
+        "invalid_request_error"
+    );
     assert!(body["error"]["param"].is_null(), "param should be null");
     assert!(body["error"]["code"].is_null(), "code should be null");
 }
