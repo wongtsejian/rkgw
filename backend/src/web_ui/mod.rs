@@ -71,8 +71,7 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .route("/config/schema", get(routes::get_config_schema))
         .route("/config/history", get(routes::get_config_history))
         .route("/auth/me", get(google_auth::auth_me))
-        // Mutating endpoints (need CSRF)
-        .route("/auth/logout", post(google_auth::logout_with_session))
+        // (logout moved to its own group — no session required)
         // Stream 3: per-user Kiro token + API key routes
         .merge(user_kiro::kiro_routes())
         .merge(api_keys::api_key_routes())
@@ -129,6 +128,14 @@ pub fn web_ui_routes(state: AppState) -> Router {
         ))
         .with_state(state.clone());
 
+    // --- Logout route (CSRF only, no session required) ---
+    // Logout must be reachable even with an expired/invalid session so it can
+    // always clear cookies and delete the DB session row.
+    let logout_routes = Router::new()
+        .route("/auth/logout", post(google_auth::logout_with_session))
+        .layer(axum::middleware::from_fn(google_auth::csrf_middleware))
+        .with_state(state.clone());
+
     // --- Public API routes (no auth required) ---
     let public_api_routes = Router::new()
         .route("/status", get(google_auth::status))
@@ -147,5 +154,6 @@ pub fn web_ui_routes(state: AppState) -> Router {
     Router::new()
         .nest("/_ui/api", session_api_routes)
         .merge(Router::new().nest("/_ui/api", admin_api_routes))
+        .merge(Router::new().nest("/_ui/api", logout_routes))
         .merge(Router::new().nest("/_ui/api", public_api_routes))
 }
