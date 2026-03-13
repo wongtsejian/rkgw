@@ -79,31 +79,6 @@ pub enum ApiError {
         redacted_content: String,
     },
 
-    /// MCP transport connection failure
-    #[error("MCP connection error: {0}")]
-    #[allow(dead_code)]
-    McpConnectionError(String),
-
-    /// MCP tool not found in registry
-    #[error("MCP tool not found: {0}")]
-    #[allow(dead_code)]
-    McpToolNotFound(String),
-
-    /// MCP server returned error during tool execution
-    #[error("MCP tool execution error: {0}")]
-    #[allow(dead_code)]
-    McpToolExecutionError(String),
-
-    /// MCP client configuration not found
-    #[error("MCP client not found: {0}")]
-    #[allow(dead_code)]
-    McpClientNotFound(String),
-
-    /// MCP JSON-RPC protocol error
-    #[error("MCP protocol error: {0}")]
-    #[allow(dead_code)]
-    McpProtocolError(String),
-
     /// Generic not found
     #[error("Not found: {0}")]
     #[allow(dead_code)]
@@ -234,17 +209,6 @@ impl IntoResponse for ApiError {
                 }));
                 return (StatusCode::OK, body).into_response();
             }
-            ApiError::McpConnectionError(msg) => {
-                (StatusCode::BAD_GATEWAY, "mcp_connection_error", msg)
-            }
-            ApiError::McpToolNotFound(msg) => (StatusCode::NOT_FOUND, "mcp_tool_not_found", msg),
-            ApiError::McpToolExecutionError(msg) => {
-                (StatusCode::BAD_GATEWAY, "mcp_tool_execution_error", msg)
-            }
-            ApiError::McpClientNotFound(msg) => {
-                (StatusCode::NOT_FOUND, "mcp_client_not_found", msg)
-            }
-            ApiError::McpProtocolError(msg) => (StatusCode::BAD_GATEWAY, "mcp_protocol_error", msg),
             ApiError::NotFound(msg) => (StatusCode::NOT_FOUND, "not_found", msg),
             ApiError::ProviderApiError {
                 provider,

@@ -69,7 +69,6 @@ flowchart TB
                 METRICS["MetricsCollector"]
                 LOGCAP["LogCapture<br/><i>Tracing layer → SSE</i>"]
                 GUARDRAILS["GuardrailsEngine<br/><i>CEL + Bedrock</i>"]
-                MCP["McpManager<br/><i>Tool servers</i>"]
             end
 
             subgraph Providers["Provider System"]
@@ -108,7 +107,6 @@ flowchart TB
         SSOOIDC["AWS SSO OIDC<br/><i>oidc.{region}.amazonaws.com</i>"]
         GOOGLE["Google OAuth<br/><i>accounts.google.com</i>"]
         BEDROCK["AWS Bedrock<br/><i>bedrock-runtime.{region}.amazonaws.com</i>"]
-        EXTERNAL_TOOLS["External MCP<br/>Tool Servers"]
         ANTHROPIC_API["Anthropic API<br/><i>api.anthropic.com</i>"]
         OPENAI_API["OpenAI API<br/><i>api.openai.com</i>"]
         GEMINI_API["Gemini API<br/><i>generativelanguage.googleapis.com</i>"]
@@ -166,10 +164,7 @@ flowchart TB
 
     OPENAI --> GUARDRAILS
     ANTHRO --> GUARDRAILS
-    OPENAI --> MCP
-    ANTHRO --> MCP
     GUARDRAILS --> BEDROCK
-    MCP -.-> |"tool servers"| EXTERNAL_TOOLS
 ```
 
 ---
@@ -234,7 +229,6 @@ classDiagram
         +Arc~DashMap~ api_key_cache
         +Arc~DashMap~ kiro_token_cache
         +Arc~DashMap~ oauth_pending
-        +Option~Arc~McpManager~~ mcp_manager
         +Option~Arc~GuardrailsEngine~~ guardrails_engine
         +Arc~ProviderRegistry~ provider_registry
         +Arc~AnthropicProvider~ anthropic_provider
@@ -341,7 +335,6 @@ flowchart TD
     MAIN --> METRICS["metrics"]
     MAIN --> LOGCAP["log_capture"]
     MAIN --> GUARDRAILS["guardrails/"]
-    MAIN --> MCP["mcp/"]
     MAIN --> PROVIDERS["providers/"]
 
     ROUTES --> CONVERTERS["converters/"]
@@ -355,7 +348,6 @@ flowchart TD
     ROUTES --> TRUNC["truncation"]
     ROUTES --> METRICS
     ROUTES --> GUARDRAILS
-    ROUTES --> MCP
     ROUTES --> PROVIDERS
 
     PROVIDERS --> WEBUI
@@ -429,9 +421,9 @@ In Full Deployment, each user has their own API keys and Kiro credentials. The m
 
 In Proxy-Only Mode, a single `PROXY_API_KEY` is used for all requests, and a single set of Kiro credentials (obtained via device code flow) serves all traffic.
 
-### 7. Pipeline Extensibility (Guardrails + MCP)
+### 7. Pipeline Extensibility (Guardrails)
 
-Input guardrails run before format conversion, output guardrails run after response collection (non-streaming only). MCP tools are injected into the request's tool list before conversion. Both features are optional (disabled by default) and fail-open to avoid blocking requests on infrastructure errors.
+Input guardrails run before format conversion, output guardrails run after response collection (non-streaming only). Guardrails are optional (disabled by default) and fail-open to avoid blocking requests on infrastructure errors.
 
 ### 8. Opt-In Observability (Datadog APM)
 
@@ -461,7 +453,6 @@ Datadog APM is zero-overhead when not configured. When `DD_AGENT_HOST` is set, t
 | `backend/src/metrics/` | Request latency, token usage, and error tracking |
 | `backend/src/log_capture.rs` | Tracing capture layer for web UI SSE log streaming |
 | `backend/src/guardrails/` | Content validation: CEL rule engine, AWS Bedrock guardrails, profiles/rules CRUD |
-| `backend/src/mcp/` | MCP Gateway: tool server connections (HTTP/SSE/STDIO), tool discovery, execution, JSON-RPC server |
 | `backend/src/providers/` | Multi-provider system: `Provider` trait, `ProviderRegistry` (credential cache + routing), implementations for Kiro, Anthropic, OpenAI, Gemini, Copilot, Qwen |
 | `backend/src/web_ui/` | Web UI API: Google SSO, sessions, per-user API keys, Kiro tokens, config, users |
 | `backend/src/web_ui/copilot_auth.rs` | GitHub Copilot OAuth flow (GitHub OAuth → Copilot token exchange) |

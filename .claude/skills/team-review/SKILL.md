@@ -70,7 +70,7 @@ Refer to `references/review-dimensions.md` for detailed per-dimension checklists
 | `backend/src/auth/`, `middleware/` | Security, Performance, Architecture          |
 | `backend/src/converters/`, `streaming/` | Performance, Architecture, Testing      |
 | `backend/src/routes/`, `web_ui/`   | Security, Performance, Architecture          |
-| `backend/src/guardrails/`, `mcp/`  | Security, Architecture, Testing              |
+| `backend/src/guardrails/`  | Security, Architecture, Testing              |
 | `frontend/src/`                    | Architecture, Testing, Accessibility         |
 | `docker-compose*`, `Dockerfile`    | Security, Architecture                       |
 | Mixed backend + frontend           | Security, Performance, Architecture, Testing |
@@ -111,7 +111,7 @@ Each dimension reviewer draws on domain expertise from the appropriate agent:
 
 Provide each reviewer with relevant context so they know where to look:
 
-- **Backend modules**: `backend/src/` -- `auth/`, `converters/`, `streaming/`, `routes/`, `middleware/`, `guardrails/`, `mcp/`, `web_ui/`, `models/`, `metrics/`
+- **Backend modules**: `backend/src/` -- `auth/`, `converters/`, `streaming/`, `routes/`, `middleware/`, `guardrails/`, `web_ui/`, `models/`, `metrics/`
 - **Frontend**: `frontend/src/` -- `pages/`, `components/`, `lib/`, `styles/`
 - **Infrastructure**: `docker-compose.yml`, `docker-compose.gateway.yml`, `Dockerfile`, `init-certs.sh`
 - **Error handling**: `thiserror` enums + `anyhow::Result` with `.context()`

@@ -127,7 +127,6 @@ Use these as starting points when generating hypotheses for common Harbangan iss
 | Backend not reachable from nginx, wrong port | Configuration Error | `docker-compose.yml`, `frontend/nginx.conf` |
 | Runtime config change lost on restart | State Corruption | `backend/src/web_ui/config_db.rs` |
 | Guardrails CEL rule rejects valid content | Logic Error | `backend/src/guardrails/` |
-| MCP client connection drops, no health recovery | Resource Exhaustion | `backend/src/mcp/client_manager.rs` |
 | Session cache grows unbounded, no eviction | Resource Exhaustion | AppState `session_cache` |
 
 ### Hypothesis Format

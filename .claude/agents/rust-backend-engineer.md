@@ -1,6 +1,6 @@
 ---
 name: rust-backend-engineer
-description: Rust/Axum backend implementation specialist. Use for implementing API endpoints, format converters, streaming parsers, authentication flows, guardrails engine, MCP client orchestration, middleware, and backend bug fixes. Follows the project's async architecture with Axum 0.7, Tokio, sqlx, and tracing.
+description: Rust/Axum backend implementation specialist. Use for implementing API endpoints, format converters, streaming parsers, authentication flows, guardrails engine, middleware, and backend bug fixes. Follows the project's async architecture with Axum 0.7, Tokio, sqlx, and tracing.
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: opus
 memory: project
@@ -19,8 +19,6 @@ converters/       -> Bidirectional format translation (OpenAI/Anthropic ↔ Kiro
   openai_to_kiro.rs, kiro_to_openai.rs
   anthropic_to_kiro.rs, kiro_to_anthropic.rs
 guardrails/       -> Content safety (CEL rule engine + AWS Bedrock API)
-mcp/              -> MCP Gateway (client lifecycle, tool discovery, execution)
-  client_manager.rs -> Client connections and health monitoring
 metrics/          -> Request latency and token usage tracking
 middleware/       -> CORS, API key auth, debug logging
 models/           -> Request/response types (OpenAI, Anthropic, Kiro formats)
@@ -67,7 +65,6 @@ For a new feature, create files in this order:
 - `AppState` in `routes/mod.rs` — central shared state (config, auth, caches, etc.)
 - `KiroHttpClient` in `http_client.rs` — connection-pooled client for Kiro API
 - `GuardrailsEngine` in `guardrails/` — CEL rule matching + Bedrock API validation
-- `McpManager` in `mcp/` — external tool server management (HTTP/SSE/STDIO transports)
 - `MetricsCollector` in `metrics/` — request latency and token tracking
 
 ## After Making Changes

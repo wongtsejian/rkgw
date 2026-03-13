@@ -194,7 +194,5 @@ docker compose -f docker-compose.gateway.yml --env-file .env.proxy up -d
 | `/v1/chat/completions` | POST | OpenAI-compatible chat completions |
 | `/v1/messages` | POST | Anthropic-compatible messages |
 | `/v1/models` | GET | List available models |
-| `/v1/mcp/tool/execute` | POST | Execute MCP tool |
-| `/mcp` | POST/GET | MCP JSON-RPC protocol |
 | `/health` | GET | Health check |
 | `/_ui/` | GET | Web dashboard |

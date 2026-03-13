@@ -10,11 +10,10 @@ const CONFIG_GROUPS = [
   'Converter',
   'HTTP Client',
   'Features',
-  'MCP Gateway',
 ] as const
 
 test.describe('Config page', () => {
-  test('renders all 8 config groups', async ({ page }) => {
+  test('renders all 7 config groups', async ({ page }) => {
     await navigateTo(page, '/config')
 
     for (const group of CONFIG_GROUPS) {
@@ -28,7 +27,7 @@ test.describe('Config page', () => {
 
     const groups = page.locator('div.config-group')
     const count = await groups.count()
-    expect(count).toBe(8)
+    expect(count).toBe(7)
 
     // Each group should have at least one config input
     for (let i = 0; i < count; i++) {

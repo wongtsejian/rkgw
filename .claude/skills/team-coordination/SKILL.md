@@ -35,7 +35,6 @@ description: Reference guide for team composition patterns, file ownership rules
 | `backend/src/auth/*` | rust-backend-engineer | Auth logic |
 | `backend/src/web_ui/*` | rust-backend-engineer | Web UI API handlers |
 | `backend/src/guardrails/*` | rust-backend-engineer | Guardrails engine |
-| `backend/src/mcp/*` | rust-backend-engineer | MCP Gateway |
 | `frontend/src/pages/*` | react-frontend-engineer | UI pages |
 | `frontend/src/components/*` | react-frontend-engineer | UI components |
 | `frontend/src/lib/*` | react-frontend-engineer | Frontend utilities |

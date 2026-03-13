@@ -307,6 +307,17 @@ impl ConfigDb {
             self.migrate_to_v15().await?;
         }
 
+        // Re-read max version after v15 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 16 {
+            self.migrate_to_v16().await?;
+        }
+
         Ok(())
     }
 
@@ -788,29 +799,6 @@ impl ConfigDb {
                 }
                 "http_max_retries" => {
                     parse_ranged!(key, value, config.http_max_retries, u32, 0, 10);
-                }
-                "mcp_enabled" => {
-                    if let Ok(v) = value.parse() {
-                        config.mcp_enabled = v;
-                    } else {
-                        tracing::warn!(
-                            "Failed to parse config '{}' value '{}', keeping default",
-                            key,
-                            value
-                        );
-                    }
-                }
-                "mcp_tool_execution_timeout" => {
-                    parse_ranged!(key, value, config.mcp_tool_execution_timeout, u64, 1, 86400);
-                }
-                "mcp_health_check_interval" => {
-                    parse_ranged!(key, value, config.mcp_health_check_interval, u64, 1, 86400);
-                }
-                "mcp_tool_sync_interval" => {
-                    parse_ranged!(key, value, config.mcp_tool_sync_interval, u64, 0, 86400);
-                }
-                "mcp_max_consecutive_failures" => {
-                    parse_ranged!(key, value, config.mcp_max_consecutive_failures, u32, 1, 100);
                 }
                 _ => {}
             }
@@ -2565,6 +2553,40 @@ impl ConfigDb {
             .context("Failed to commit v15 migration")?;
 
         tracing::info!("Database migration to version 15 complete");
+        Ok(())
+    }
+
+    /// Version 16 migration: drop MCP clients table and config keys.
+    async fn migrate_to_v16(&self) -> Result<()> {
+        tracing::info!("Running database migration to version 16 (drop MCP clients)...");
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin v16 migration transaction")?;
+
+        sqlx::query("DROP TABLE IF EXISTS mcp_clients")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to drop mcp_clients table")?;
+
+        sqlx::query("DELETE FROM config WHERE key LIKE 'mcp_%'")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to remove MCP config keys")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(16_i32)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to record schema version 16")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit v16 migration")?;
+
+        tracing::info!("Database migration to version 16 complete");
         Ok(())
     }
 

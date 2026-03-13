@@ -43,13 +43,6 @@ pub struct Config {
     #[allow(dead_code)]
     pub default_provider: String,
 
-    // MCP Gateway
-    pub mcp_enabled: bool,
-    pub mcp_tool_execution_timeout: u64,
-    pub mcp_health_check_interval: u64,
-    pub mcp_tool_sync_interval: u64,
-    pub mcp_max_consecutive_failures: u32,
-
     // Database
     pub database_url: Option<String>,
 
@@ -109,11 +102,6 @@ impl Config {
             truncation_recovery: true,
             guardrails_enabled: false,
             default_provider: "kiro".to_string(),
-            mcp_enabled: false,
-            mcp_tool_execution_timeout: 30,
-            mcp_health_check_interval: 10,
-            mcp_tool_sync_interval: 600,
-            mcp_max_consecutive_failures: 5,
             database_url: None,
             proxy_api_key: None,
             kiro_refresh_token: None,

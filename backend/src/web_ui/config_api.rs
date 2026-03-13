@@ -28,11 +28,6 @@ pub fn classify_config_change(key: &str) -> ChangeType {
         | "tool_description_max_length"
         | "first_token_timeout"
         | "guardrails_enabled"
-        | "mcp_enabled"
-        | "mcp_tool_execution_timeout"
-        | "mcp_health_check_interval"
-        | "mcp_tool_sync_interval"
-        | "mcp_max_consecutive_failures"
         | "auth_google_enabled"
         | "auth_password_enabled" => ChangeType::HotReload,
         "server_host"
@@ -102,7 +97,6 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
         "fake_reasoning_enabled"
         | "truncation_recovery"
         | "guardrails_enabled"
-        | "mcp_enabled"
         | "auth_google_enabled"
         | "auth_password_enabled" => {
             if value.is_boolean() || value.as_str().is_some_and(|s| s == "true" || s == "false") {
@@ -142,28 +136,6 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
                 .ok_or_else(|| "first_token_timeout must be a positive integer".to_string())?;
             if n == 0 || n > 86400 {
                 return Err("first_token_timeout must be between 1 and 86400".to_string());
-            }
-            Ok(())
-        }
-        "mcp_tool_execution_timeout" | "mcp_health_check_interval" | "mcp_tool_sync_interval" => {
-            let n = value
-                .as_u64()
-                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
-                .ok_or_else(|| format!("{} must be a non-negative integer", key))?;
-            if n > 86400 {
-                return Err(format!("{} must be between 0 and 86400", key));
-            }
-            Ok(())
-        }
-        "mcp_max_consecutive_failures" => {
-            let n = value
-                .as_u64()
-                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
-                .ok_or_else(|| {
-                    "mcp_max_consecutive_failures must be a positive integer".to_string()
-                })?;
-            if n == 0 || n > 100 {
-                return Err("mcp_max_consecutive_failures must be between 1 and 100".to_string());
             }
             Ok(())
         }
@@ -278,30 +250,10 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
         "guardrails_enabled",
         "Enable AWS Bedrock guardrails for input/output validation",
     );
-    m.insert(
-        "mcp_enabled",
-        "Enable MCP Gateway for external tool connections",
-    );
     m.insert("auth_google_enabled", "Enable Google SSO authentication");
     m.insert(
         "auth_password_enabled",
         "Enable username/password authentication",
-    );
-    m.insert(
-        "mcp_tool_execution_timeout",
-        "Seconds before an MCP tool execution times out (1-86400)",
-    );
-    m.insert(
-        "mcp_health_check_interval",
-        "Seconds between MCP client health checks (1-86400)",
-    );
-    m.insert(
-        "mcp_tool_sync_interval",
-        "Seconds between MCP tool list sync refreshes (0-86400)",
-    );
-    m.insert(
-        "mcp_max_consecutive_failures",
-        "Max consecutive health check failures before marking client as error (1-100)",
     );
     m
 }

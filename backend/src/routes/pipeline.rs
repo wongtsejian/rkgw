@@ -86,7 +86,7 @@ pub(crate) async fn build_kiro_credentials(
     })
 }
 
-/// Read the config snapshot for guard/MCP checks in the pipeline.
+/// Read the config snapshot for guardrail checks in the pipeline.
 pub(crate) fn read_config(state: &AppState) -> Config {
     state
         .config
@@ -254,23 +254,4 @@ pub(crate) async fn run_output_guardrail_check(
             Ok(())
         }
     }
-}
-
-/// Fetch MCP tools from the gateway and merge them into the existing tool list.
-pub(crate) async fn inject_mcp_tools<T: serde::de::DeserializeOwned>(
-    mcp: &crate::mcp::McpManager,
-    headers: &axum::http::HeaderMap,
-    existing_tools: Option<Vec<T>>,
-) -> Option<Vec<T>> {
-    let mcp_tools = mcp.get_available_tools(headers).await;
-    if mcp_tools.is_empty() {
-        return existing_tools;
-    }
-    let mut tools = existing_tools.unwrap_or_default();
-    for tool_val in mcp_tools {
-        if let Ok(tool) = serde_json::from_value(tool_val) {
-            tools.push(tool);
-        }
-    }
-    Some(tools)
 }

@@ -13,8 +13,8 @@ use crate::providers::types::{ProviderContext, ProviderId};
 
 use super::pipeline::{
     build_kiro_credentials, build_request_context_openai, extract_assistant_content,
-    extract_last_user_message, inject_mcp_tools, read_config, resolve_provider_routing,
-    run_input_guardrail_check, run_output_guardrail_check,
+    extract_last_user_message, read_config, resolve_provider_routing, run_input_guardrail_check,
+    run_output_guardrail_check,
 };
 use super::state::{AppState, UserKiroCreds};
 
@@ -68,7 +68,6 @@ pub(crate) async fn chat_completions_handler(
     raw_request: axum::http::Request<Body>,
 ) -> Result<Response, ApiError> {
     let user_creds = raw_request.extensions().get::<UserKiroCreds>().cloned();
-    let headers = raw_request.headers().clone();
 
     // Parse JSON body
     let body_bytes = axum::body::to_bytes(raw_request.into_body(), 10 * 1024 * 1024)
@@ -135,13 +134,6 @@ pub(crate) async fn chat_completions_handler(
             .into_iter()
             .filter_map(|v| serde_json::from_value(v).ok())
             .collect();
-    }
-
-    // MCP tool injection
-    if config.mcp_enabled {
-        if let Some(ref mcp) = state.mcp_manager {
-            request.tools = inject_mcp_tools(mcp, &headers, request.tools).await;
-        }
     }
 
     // Input guardrails

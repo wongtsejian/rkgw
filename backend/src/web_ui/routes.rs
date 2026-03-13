@@ -85,11 +85,6 @@ pub async fn get_config(State(state): State<AppState>) -> Json<Value> {
             "fake_reasoning_max_tokens": config.fake_reasoning_max_tokens,
             "truncation_recovery": config.truncation_recovery,
             "guardrails_enabled": config.guardrails_enabled,
-            "mcp_enabled": config.mcp_enabled,
-            "mcp_tool_execution_timeout": config.mcp_tool_execution_timeout,
-            "mcp_health_check_interval": config.mcp_health_check_interval,
-            "mcp_tool_sync_interval": config.mcp_tool_sync_interval,
-            "mcp_max_consecutive_failures": config.mcp_max_consecutive_failures,
             "tool_description_max_length": config.tool_description_max_length,
         }
     }))
@@ -194,41 +189,6 @@ fn apply_config_field(state: &AppState, key: &str, value: &Value) -> bool {
             }
             Err(_) => false,
         },
-        "mcp_enabled" => match value_str.parse() {
-            Ok(v) => {
-                config.mcp_enabled = v;
-                true
-            }
-            Err(_) => false,
-        },
-        "mcp_tool_execution_timeout" => match value_str.parse() {
-            Ok(v) => {
-                config.mcp_tool_execution_timeout = v;
-                true
-            }
-            Err(_) => false,
-        },
-        "mcp_health_check_interval" => match value_str.parse() {
-            Ok(v) => {
-                config.mcp_health_check_interval = v;
-                true
-            }
-            Err(_) => false,
-        },
-        "mcp_tool_sync_interval" => match value_str.parse() {
-            Ok(v) => {
-                config.mcp_tool_sync_interval = v;
-                true
-            }
-            Err(_) => false,
-        },
-        "mcp_max_consecutive_failures" => match value_str.parse() {
-            Ok(v) => {
-                config.mcp_max_consecutive_failures = v;
-                true
-            }
-            Err(_) => false,
-        },
         "tool_description_max_length" => match value_str.parse() {
             Ok(v) => {
                 config.tool_description_max_length = v;
@@ -281,17 +241,10 @@ pub async fn get_config_schema() -> Json<Value> {
             | "http_max_connections"
             | "http_connect_timeout"
             | "http_request_timeout"
-            | "http_max_retries"
-            | "mcp_tool_execution_timeout"
-            | "mcp_health_check_interval"
-            | "mcp_tool_sync_interval"
-            | "mcp_max_consecutive_failures" => {
+            | "http_max_retries" => {
                 field.insert("type".to_string(), json!("number"));
             }
-            "fake_reasoning_enabled"
-            | "truncation_recovery"
-            | "guardrails_enabled"
-            | "mcp_enabled" => {
+            "fake_reasoning_enabled" | "truncation_recovery" | "guardrails_enabled" => {
                 field.insert("type".to_string(), json!("boolean"));
             }
             _ => {

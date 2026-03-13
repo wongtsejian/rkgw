@@ -335,50 +335,6 @@ ss -tlnp | grep -E ':(80|443)\s'
 
 ---
 
-## MCP Gateway Issues
-
-### MCP client stuck in "Error" state
-
-**Cause:** The MCP server has failed consecutive health checks beyond the configured threshold.
-
-**Solutions:**
-- Check the health check interval (`mcp_health_check_interval`, default: 10s) and max failures (`mcp_max_consecutive_failures`, default: 5)
-- Verify the MCP server is reachable from the Docker network
-- Check the server's connection string or STDIO command is correct
-- Try the **Reconnect** action in the MCP management UI to force a fresh connection
-
-### Tools not appearing in chat requests
-
-**Cause:** MCP tools are not being injected into chat completion requests.
-
-**Solutions:**
-- Verify `mcp_enabled` is set to `true` in the configuration
-- Check the MCP client is in "Connected" state (not Error or Disconnected)
-- Check the client's `tools_to_execute` whitelist — it must include the tool name or `*` for all
-- If using per-request filtering, check your headers:
-  - `x-kgw-mcp-include-clients` must include the client name (or `*`)
-  - `x-kgw-mcp-include-tools` must include the tool (or `clientName-*`)
-
-### STDIO transport fails to start
-
-**Cause:** The STDIO command is not in the allowed command list.
-
-**Solutions:**
-- Only these commands are allowed: `npx`, `node`, `python`, `python3`, `uvx`, `docker`
-- Check that the command is available in the backend container's PATH
-- Verify no blocked environment variables are set (`LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, etc.)
-
-### HTTP/SSE transport connection refused
-
-**Cause:** The MCP server URL is unreachable or blocked by SSRF protections.
-
-**Solutions:**
-- Private/reserved IP addresses are blocked by default (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
-- If your MCP server is on the same Docker network, use the container hostname rather than a private IP
-- Verify the URL is accessible from within the Docker network: `docker compose exec backend curl -v <mcp-server-url>`
-
----
-
 ## Guardrails Issues
 
 ### Guardrails not blocking content

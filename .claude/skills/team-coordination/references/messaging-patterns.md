@@ -24,19 +24,19 @@ Let me know if you have questions or blockers.
 
 **Harbangan example** (scrum-master to rust-backend-engineer):
 ```
-You've been assigned task #3: Add MCP health check endpoint.
+You've been assigned task #3: Add guardrails test endpoint.
 
 Owned files:
-- backend/src/mcp/client_manager.rs
-- backend/src/mcp/mod.rs
+- backend/src/guardrails/api.rs
+- backend/src/guardrails/engine.rs
 
 Key requirements:
-- Return health status for each registered MCP server
-- Include last_seen timestamp and connection state
+- Accept sample content and validate against a specific profile
+- Return guardrail action and response time
 
 Interface contract:
-- Export McpHealthStatus from mcp/mod.rs
-- react-frontend-engineer will consume via /_ui/api/admin/mcp/clients/health
+- Export GuardrailTestResult from guardrails/types.rs
+- react-frontend-engineer will consume via /_ui/api/guardrails/test
 
 Let me know if you have questions or blockers.
 ```
@@ -81,14 +81,14 @@ Waiting for your guidance.
 
 **Harbangan example** (react-frontend-engineer to scrum-master):
 ```
-I'm blocked on task #5: MCP server management page.
+I'm blocked on task #5: Guardrails management page.
 
-Blocker: The backend endpoint GET /_ui/api/admin/mcp/clients returns a different
-shape than the agreed contract — missing "transport_type" field.
-Impact: Cannot render the server list table without transport info.
+Blocker: The backend endpoint GET /_ui/api/guardrails/profiles returns a different
+shape than the agreed contract — missing "region" field.
+Impact: Cannot render the profile list table without region info.
 
 Options:
-1. rust-backend-engineer adds transport_type to the response
+1. rust-backend-engineer adds region to the response
 2. I hardcode "unknown" and we fix later
 
 Waiting for your guidance.

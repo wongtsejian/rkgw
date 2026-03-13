@@ -79,8 +79,6 @@ pub struct AppState {
     // Feature subsystems
     /// Guardrails engine for input/output validation (None when guardrails disabled or no DB)
     pub guardrails_engine: Option<Arc<crate::guardrails::engine::GuardrailsEngine>>,
-    /// MCP Gateway manager (None when mcp_enabled=false or feature not yet initialized)
-    pub mcp_manager: Option<Arc<crate::mcp::McpManager>>,
     // Multi-provider support
     /// Routes requests to the right provider based on user API keys
     pub provider_registry: Arc<ProviderRegistry>,

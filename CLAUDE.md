@@ -73,7 +73,7 @@ Set in `.env` (see `.env.example`):
 
 Auto-set by docker-compose: `DATABASE_URL`, `SERVER_HOST` (0.0.0.0), `SERVER_PORT` (8000).
 
-All runtime config (region, timeouts, debug mode, etc.) is managed via the Web UI at `/_ui/` and persisted in PostgreSQL. This includes `mcp_enabled` and `guardrails_enabled` (both default to `false`).
+All runtime config (region, timeouts, debug mode, etc.) is managed via the Web UI at `/_ui/` and persisted in PostgreSQL. This includes `guardrails_enabled` (default `false`).
 
 ## Architecture
 
@@ -140,7 +140,6 @@ Defined in `backend/src/routes/mod.rs`:
 - `kiro_token_cache: Arc<DashMap<Uuid, (String, String, Instant)>>` — per-user Kiro tokens (4-min TTL)
 - `oauth_pending: Arc<DashMap<String, OAuthPendingState>>` — PKCE state (10-min TTL, 10k cap)
 - `guardrails_engine: Option<Arc<GuardrailsEngine>>` — Content validation engine (CEL rules + Bedrock API)
-- `mcp_manager: Option<Arc<McpManager>>` — MCP Gateway orchestrator (client connections, tool discovery, execution)
 - `login_rate_limiter: Arc<LoginRateLimiter>` — per-IP login attempt rate limiting
 
 ### Key Modules (backend/src/)
@@ -152,7 +151,6 @@ Defined in `backend/src/routes/mod.rs`:
 - `web_ui/` — Web UI API handlers. Google SSO (`google_auth.rs`), password auth + TOTP 2FA (`password_auth.rs`), session management (`session.rs`), per-user API keys (`api_keys.rs`), per-user Kiro tokens (`user_kiro.rs`), config persistence (`config_db.rs`).
 - `middleware/` — CORS, API key auth (SHA-256 + cache/DB lookup), debug logging.
 - `guardrails/` — Content safety via AWS Bedrock guardrails (CEL rule engine + Bedrock API). Input/output validation with configurable rules stored in PostgreSQL.
-- `mcp/` — MCP Gateway. Manages external tool servers over HTTP/SSE/STDIO transports. Includes client lifecycle (`client_manager.rs`), health monitoring, tool discovery/sync, and DB persistence.
 - `metrics/` — Request latency and token usage tracking (`MetricsCollector`).
 - `resolver.rs` — Maps model aliases to canonical Kiro model IDs. Don't hardcode model IDs.
 - `tokenizer.rs` — Token counting via tiktoken (cl100k_base) with Claude correction factor (1.15x).
@@ -166,11 +164,6 @@ Defined in `backend/src/routes/mod.rs`:
 - `POST /v1/chat/completions` — OpenAI-compatible
 - `POST /v1/messages` — Anthropic-compatible
 - `GET /v1/models` — List models
-- `POST /v1/mcp/tool/execute` — Execute MCP tool
-
-**MCP Server Protocol (auth via API key):**
-- `POST /mcp` — JSON-RPC 2.0 MCP server protocol
-- `GET /mcp` — MCP SSE stream
 
 **Infrastructure:**
 - `GET /health` — Health check
@@ -181,7 +174,6 @@ Defined in `backend/src/routes/mod.rs`:
 - Session: `/metrics`, `/system`, `/models`, `/logs`, `/config`, `/config/schema`, `/config/history`, `/auth/me`, `/auth/2fa/setup` (GET), `/auth/2fa/verify` (POST), `/auth/password/change` (POST), `/stream/metrics` (SSE), `/stream/logs` (SSE)
 - Mutations (+ CSRF): `/auth/logout`, Kiro token routes, API key routes
 - Admin-only (+ CSRF): `PUT /config`, domain allowlist routes, user management routes, `POST /admin/users/create`, `POST /admin/users/:id/reset-password`
-- Admin-only: MCP client CRUD routes (`/_ui/api/admin/mcp/clients/*`)
 - Admin-only: Guardrails profile/rule CRUD routes (`/_ui/api/guardrails/*`), CEL validation, profile testing
 
 ## Service Map

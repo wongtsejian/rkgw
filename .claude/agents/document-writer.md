@@ -31,7 +31,7 @@ Use Slack MCP tools (`mcp__claude_ai_Slack__*`) for team communication.
 
 ### Technical Documentation
 - **Architecture guides** — system design, request flow, component relationships
-- **API documentation** — proxy endpoints, web UI API, MCP protocol, auth flows
+- **API documentation** — proxy endpoints, web UI API, auth flows
 - **Deployment runbooks** — Docker setup, cert provisioning, proxy-only mode
 - **Development setup guides** — local environment, tooling, debugging tips
 - **Code pattern guides** — Rust conventions, React patterns, error handling

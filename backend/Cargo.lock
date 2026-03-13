@@ -1489,7 +1489,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tokio-test",
- "tokio-util",
  "totp-rs",
  "tower 0.4.13",
  "tower-http 0.5.2",

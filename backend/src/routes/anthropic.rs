@@ -13,7 +13,7 @@ use crate::providers::types::{ProviderContext, ProviderId};
 
 use super::pipeline::{
     build_kiro_credentials, build_request_context_anthropic, extract_assistant_content_anthropic,
-    extract_last_user_message_anthropic, inject_mcp_tools, read_config, resolve_provider_routing,
+    extract_last_user_message_anthropic, read_config, resolve_provider_routing,
     run_input_guardrail_check, run_output_guardrail_check,
 };
 use super::state::{AppState, UserKiroCreds};
@@ -116,13 +116,6 @@ pub(crate) async fn anthropic_messages_handler(
                 content: v["content"].clone(),
             })
             .collect();
-    }
-
-    // MCP tool injection
-    if config.mcp_enabled {
-        if let Some(ref mcp) = state.mcp_manager {
-            request.tools = inject_mcp_tools(mcp, &headers, request.tools).await;
-        }
     }
 
     // Input guardrails

@@ -138,7 +138,6 @@ mod tests {
             kiro_token_cache: Arc::new(DashMap::new()),
             oauth_pending: Arc::new(DashMap::new()),
             guardrails_engine: None,
-            mcp_manager: None,
             provider_registry: Arc::new(ProviderRegistry::new()),
             providers: crate::providers::build_provider_map(http_client, auth_manager, config_arc),
             provider_oauth_pending: Arc::new(DashMap::new()),

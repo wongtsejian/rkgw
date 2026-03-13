@@ -446,7 +446,6 @@ Tables are created automatically on first connection. Key tables include:
 | `user_provider_priority` | Per-user provider priority ordering |
 | `config` | Key-value configuration store |
 | `config_history` | Audit log of configuration changes |
-| `mcp_clients` | MCP server connections (config, state, encrypted headers) |
 | `guardrail_profiles` | AWS Bedrock guardrail profiles (credentials encrypted) |
 | `guardrail_rules` | Guardrail rules (CEL expressions, sampling, timeouts) |
 

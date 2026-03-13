@@ -75,10 +75,9 @@ base64 = "0.22"
 urlencoding = "2"
 rand = "0.8"
 
-# MCP Gateway
+# Async utilities
 async-trait = "0.1"
 async-stream = "0.3"
-tokio-util = { version = "0.7", features = ["codec"] }
 
 # AWS Bedrock guardrails
 aws-sigv4 = "1"

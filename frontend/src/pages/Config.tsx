@@ -80,17 +80,6 @@ const CONFIG_GROUPS: { title: string; icon: string; fields: ConfigField[] }[] = 
     ],
   },
   {
-    title: 'MCP Gateway',
-    icon: 'link',
-    fields: [
-      { key: 'mcp_enabled', label: 'MCP Gateway', type: 'checkbox' },
-      { key: 'mcp_tool_execution_timeout', label: 'Tool Exec Timeout (s)', type: 'number' },
-      { key: 'mcp_health_check_interval', label: 'Health Check Interval (s)', type: 'number' },
-      { key: 'mcp_tool_sync_interval', label: 'Tool Sync Interval (s)', type: 'number' },
-      { key: 'mcp_max_consecutive_failures', label: 'Max Failures', type: 'number' },
-    ],
-  },
-  {
     title: 'Authentication',
     icon: 'lock',
     fields: [

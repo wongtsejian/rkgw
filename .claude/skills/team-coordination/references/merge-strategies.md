@@ -9,8 +9,8 @@ Patterns for integrating parallel work streams in Harbangan and preventing confl
 All agents commit to the same branch. Integration happens naturally through strict file ownership.
 
 ```
-feature/mcp-health
-  <- rust-backend-engineer commits (backend/src/mcp/*)
+feature/guardrails-ui
+  <- rust-backend-engineer commits (backend/src/guardrails/*)
   <- react-frontend-engineer commits (frontend/src/pages/*, frontend/src/components/*)
   <- devops-engineer commits (docker-compose*.yml)
 ```
@@ -53,7 +53,7 @@ main <- all agents commit
 
 **When to use**: CI/CD environments, features that can be incrementally enabled, continuous deployment.
 
-**Harbangan suitability**: Natural fit. Harbangan already uses runtime config flags (`mcp_enabled`, `guardrails_enabled`) stored in PostgreSQL and toggled via the web UI. New features can follow the same pattern:
+**Harbangan suitability**: Natural fit. Harbangan already uses runtime config flags (`guardrails_enabled`) stored in PostgreSQL and toggled via the web UI. New features can follow the same pattern:
 
 ```rust
 // In route handler
@@ -75,7 +75,7 @@ main (project root)
   ├── .trees/fullstack-a1b2/     <- Team A worktree (branch: feat/guardrails-ui)
   │     ├── backend/src/...      <- Team A's rust-backend-engineer
   │     └── frontend/src/...     <- Team A's react-frontend-engineer
-  ├── .trees/backend-c3d4/       <- Team B worktree (branch: feat/mcp-health)
+  ├── .trees/backend-c3d4/       <- Team B worktree (branch: feat/provider-priority)
   │     └── backend/src/...      <- Team B's rust-backend-engineer
   └── (main working dir)         <- First team or solo work (no worktree)
 ```

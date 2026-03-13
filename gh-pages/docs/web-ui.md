@@ -22,7 +22,6 @@ flowchart TB
         Config[Config Manager]
         Admin[Admin Panel]
         Guardrails[Guardrails Config]
-        MCP[MCP Client Manager]
     end
 
     subgraph Nginx["nginx (:443/:80)"]
@@ -53,7 +52,6 @@ flowchart TB
             ConfigWrite[PUT /config]
             UserMgmt[User Management]
             DomainAllow[Domain Allowlist]
-            MCPAdmin[MCP client CRUD]
             GuardrailsAdmin[Guardrails CRUD]
         end
     end
@@ -70,7 +68,6 @@ flowchart TB
     Config --> ConfigRead
     Config --> ConfigWrite
     Admin --> UserMgmt
-    MCP --> MCPAdmin
     Guardrails --> GuardrailsAdmin
 ```
 
@@ -152,15 +149,6 @@ Content safety configuration powered by AWS Bedrock:
 
 - **Profiles** — Create and manage AWS Bedrock guardrail connections (guardrail ID, version, region, AWS credentials). Enable/disable individually. Test profiles against sample content.
 - **Rules** — Define when guardrails apply using CEL expressions. Configure apply direction (input/output/both), sampling rate, timeout, and linked profiles. Validate CEL syntax before saving.
-
-### MCP Clients (`/_ui/mcp`) — Admin Only
-
-MCP (Model Context Protocol) tool server management:
-
-- **Add/Edit Clients** — Configure MCP server connections with HTTP, SSE, or STDIO transport. Set authentication headers and tool whitelists.
-- **Connection Status** — Monitor each server's connection state (Connected, Connecting, Disconnected, Error).
-- **Tool Discovery** — View discovered tools per server with auto-refresh intervals.
-- **Reconnect** — Force disconnect and reconnect to refresh tool lists or recover from errors.
 
 ### Admin (`/_ui/admin`) — Admin Only
 
@@ -356,68 +344,6 @@ The `GET /_ui/api/logs` endpoint returns the current contents of the log buffer 
 
 ---
 
-## MCP Gateway Management
-
-The MCP Gateway management interface allows admins to connect, configure, and monitor external MCP (Model Context Protocol) tool servers. This section is admin-only.
-
-### Adding MCP Servers
-
-To add an MCP server, provide:
-
-- **Name** — A unique identifier for the server (used in tool namespacing as the `clientName` prefix)
-- **Connection Type** — How the gateway connects to the server:
-  - **HTTP** — Stateless POST-based transport. Provide a URL endpoint.
-  - **SSE** — Persistent Server-Sent Events stream. Provide a URL endpoint.
-  - **STDIO** — Child process transport over newline-delimited JSON-RPC. Provide a command, arguments, and optional environment variables.
-- **Connection String** — The URL for HTTP or SSE connections
-
-### Authentication
-
-Each MCP server connection can optionally include authentication:
-
-- **None** — No authentication headers
-- **Custom Headers** — Provide key-value pairs injected into every request to the MCP server
-
-### Tool Filtering
-
-Each server has a tool whitelist (`tools_to_execute`):
-
-- Set to `["*"]` to allow all tools from the server
-- Specify individual tool names to restrict which tools are available
-
-Additionally, clients can filter tools per-request using headers on chat completion requests:
-
-- `x-kgw-mcp-include-clients: client1,client2` — Include tools from specific clients only (`*` for all)
-- `x-kgw-mcp-include-tools: client1-search,client2-*` — Include specific tools or all tools from a client
-
-### Health Monitoring
-
-The gateway monitors each connected MCP server:
-
-- **Health check interval** — Configurable polling interval (default: 10 seconds)
-- **Max consecutive failures** — After this many consecutive health check failures (default: 5), the client is marked as "Error" state
-- **Connection states** — Connected, Connecting, Disconnected, or Error
-
-### Tool Sync
-
-Tools are automatically discovered from connected servers:
-
-- **Auto-refresh** — Tool lists are re-synced at a configurable interval (default: 600 seconds)
-- **Per-client interval** — Each client can override the sync interval (set to 0 to disable)
-- Tools are namespaced as `{clientName}_{toolName}` when injected into chat requests
-
-### Reconnect
-
-Use the reconnect action to force a server to disconnect and reconnect. This is useful after fixing connectivity issues or when a server's tool list has changed.
-
-### Security
-
-- **SSRF protection** — HTTP/SSE transport validates that URLs don't resolve to private or reserved IP addresses (127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, etc.)
-- **STDIO command allowlist** — Only permitted commands can be executed: `npx`, `node`, `python`, `python3`, `uvx`, `docker`
-- **Blocked environment variables** — Dangerous env vars (`LD_PRELOAD`, `DYLD_INSERT_LIBRARIES`, etc.) are rejected in STDIO configurations
-
----
-
 ## Content Guardrails Management
 
 The Content Guardrails system provides content validation powered by AWS Bedrock guardrails with a flexible CEL (Common Expression Language) rule engine. This section is admin-only.
@@ -527,7 +453,6 @@ These require a valid session and CSRF token.
 | `PUT` | `/_ui/api/config` | Update gateway configuration |
 | `*` | `/_ui/api/domains/*` | Domain allowlist management |
 | `*` | `/_ui/api/users/*` | User management |
-| `*` | `/_ui/api/admin/mcp/*` | MCP client management |
 | `*` | `/_ui/api/admin/guardrails/*` | Guardrails profile/rule management |
 
 ---

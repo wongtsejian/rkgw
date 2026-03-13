@@ -204,7 +204,6 @@ All investigators reported?
 |---------|-----------|-----------|-------------------|
 | 503 under load | HTTP connection pool exhausted | `backend/src/http_client.rs` | Pool max reached, no timeout on acquisition |
 | Increasing latency | Log buffer grows without bound | `log_buffer` in AppState, `backend/src/log_capture.rs` | VecDeque has no max capacity, `.push_back()` without `.pop_front()` |
-| MCP tool timeout | MCP client connection leaked on error path | `backend/src/mcp/client_manager.rs` | Connection not closed in error branch, accumulates over time |
 | Memory growth | Session or OAuth pending map never cleaned | `session_cache`, `oauth_pending` in AppState | No TTL eviction task, map grows monotonically |
 
 ### Integration Failure

@@ -33,7 +33,6 @@ sequenceDiagram
     participant Setup as Setup Guard
     participant Handler as Route Handler
     participant GuardrailEngine as Guardrails Engine
-    participant McpMgr as MCP Manager
     participant Resolver as Model Resolver
     participant Registry as ProviderRegistry
     participant Converter as Converter
@@ -93,12 +92,6 @@ sequenceDiagram
         Registry->>Registry: Select provider by priority + model match
     end
     Registry-->>Handler: ProviderCredentials {provider, access_token, base_url}
-
-    opt MCP enabled
-        Handler->>McpMgr: get_available_tools(request_headers)
-        McpMgr-->>Handler: MCP tools (namespaced as clientName_toolName)
-        Handler->>Handler: Inject MCP tools into request tool list
-    end
 
     alt Kiro provider (default)
         Handler->>Truncation: Inject recovery messages (if enabled)
@@ -277,16 +270,6 @@ For the Kiro provider, the request continues through the format conversion and s
 
 When `truncation_recovery` is enabled (default: `true`), the handler calls `truncation::inject_openai_truncation_recovery()` or `truncation::inject_anthropic_truncation_recovery()` to modify the message array. If a previous response was detected as truncated, a recovery message is injected asking the model to re-emit the truncated content.
 
-### Step 7.5: MCP Tool Injection
-
-If `mcp_manager` is present and enabled, the handler calls `mcp_manager.get_available_tools(headers)` to retrieve tools from all connected MCP servers. Tools are namespaced as `{clientName}_{toolName}` to avoid collisions across servers.
-
-Two-tier filtering controls which tools are injected:
-1. **Client config whitelist** — the `tools_to_execute` field on each MCP client config limits which of its tools are exposed
-2. **Per-request headers** — clients can send `x-kgw-mcp-include-clients` and `x-kgw-mcp-include-tools` headers to filter tools for a specific request
-
-The filtered tools are merged into the request's existing tool list before format conversion.
-
 ### Step 8: Format Conversion (Inbound)
 
 The converter modules translate the client request into the Kiro wire format:
@@ -395,11 +378,6 @@ flowchart TD
         INTERNAL["Internal<br/><i>500 Internal Server Error</i>"]
         GUARD_BLOCK["GuardrailBlocked<br/><i>403 Forbidden</i>"]
         GUARD_WARN["GuardrailWarning<br/><i>200 OK (redacted)</i>"]
-        MCP_CONN["McpConnectionError<br/><i>502 Bad Gateway</i>"]
-        MCP_TOOL["McpToolNotFound<br/><i>404 Not Found</i>"]
-        MCP_EXEC["McpToolExecutionError<br/><i>502 Bad Gateway</i>"]
-        MCP_CLIENT["McpClientNotFound<br/><i>404 Not Found</i>"]
-        MCP_PROTO["McpProtocolError<br/><i>502 Bad Gateway</i>"]
     end
 
     MW_STAGE["Middleware"] --> AUTH_ERR
@@ -410,11 +388,6 @@ flowchart TD
     ANY_STAGE["Any Stage"] --> INTERNAL
     GUARDRAIL_STAGE["Guardrails"] --> GUARD_BLOCK
     GUARDRAIL_STAGE --> GUARD_WARN
-    MCP_STAGE["MCP Gateway"] --> MCP_CONN
-    MCP_STAGE --> MCP_TOOL
-    MCP_STAGE --> MCP_EXEC
-    MCP_STAGE --> MCP_CLIENT
-    MCP_STAGE --> MCP_PROTO
 ```
 
 All errors are returned as JSON in the OpenAI error format:

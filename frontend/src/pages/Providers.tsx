@@ -330,7 +330,7 @@ function ProviderSection({
                 <td style={{ color: 'var(--text-secondary)' }}>{m.display_name}</td>
                 <td style={{ color: 'var(--text-tertiary)' }}>{m.context_length.toLocaleString()}</td>
                 <td>
-                  <span className="mcp-type-badge">{m.source}</span>
+                  <span className="source-badge">{m.source}</span>
                 </td>
                 <td>
                   <button

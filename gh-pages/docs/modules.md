@@ -43,7 +43,6 @@ graph TD
     error["error.rs<br/><i>Error types</i>"]
     bench["bench/<br/><i>Benchmarking</i>"]
     guardrails["guardrails/<br/><i>CEL rules + Bedrock<br/>content validation</i>"]
-    mcp["mcp/<br/><i>MCP Gateway: tool servers,<br/>JSON-RPC, transports</i>"]
     providers["providers/<br/><i>Provider trait, registry,<br/>Kiro/Anthropic/OpenAI/<br/>Gemini/Copilot/Qwen</i>"]
 
     main --> config
@@ -51,7 +50,6 @@ graph TD
     main --> web_ui
     main --> log_capture
     main --> guardrails
-    main --> mcp
     main --> providers
 
     routes --> middleware
@@ -64,7 +62,6 @@ graph TD
     routes --> truncation
     routes --> tokenizer
     routes --> guardrails
-    routes --> mcp
     routes --> providers
 
     converters --> models
@@ -83,9 +80,7 @@ graph TD
     http_client --> auth
     http_client --> error
 
-    mcp --> web_ui
     guardrails --> web_ui
-    providers --> web_ui
 
     style main fill:#4a9eff,color:#fff
     style routes fill:#ff6b6b,color:#fff
@@ -96,7 +91,6 @@ graph TD
     style models fill:#868e96,color:#fff
     style log_capture fill:#ff922b,color:#fff
     style guardrails fill:#e64980,color:#fff
-    style mcp fill:#20c997,color:#fff
     style providers fill:#339af0,color:#fff
 ```
 
@@ -220,23 +214,6 @@ graph TD
 | `providers::copilot` | `backend/src/providers/copilot.rs` | Copilot provider — relay to GitHub Copilot API. Uses Copilot-specific headers (Editor-Version, Editor-Plugin-Version, Copilot-Integration-Id). Base URL from token exchange (may vary for enterprise). |
 | `providers::qwen` | `backend/src/providers/qwen.rs` | Qwen provider — relay to `chat.qwen.ai`. Handles Qwen-specific API format and authentication. |
 
-### MCP Gateway
-
-| Module | File(s) | Description |
-|--------|---------|-------------|
-| `mcp` | `backend/src/mcp/mod.rs` | `McpManager` — orchestrates MCP client connections, tool discovery, and execution. Manages background health monitors and tool syncers per client. Initialization loads clients from DB and auto-connects enabled clients. |
-| `mcp::api` | `backend/src/mcp/api.rs` | Admin API handlers: CRUD for MCP clients, reconnect, list tools per client. Tool execution endpoint (`POST /v1/mcp/tool/execute`). All admin routes require session + CSRF. |
-| `mcp::server` | `backend/src/mcp/server.rs` | JSON-RPC 2.0 server at `/mcp`. Implements `initialize`, `tools/list`, `tools/call`, `ping` methods. GET returns SSE stream for keep-alive. Aggregates tools from all connected clients with `{clientName}_{toolName}` namespacing. |
-| `mcp::client_manager` | `backend/src/mcp/client_manager.rs` | `ClientManager` — handles transport creation, connection lifecycle, initialization handshake (MCP `initialize` + `notifications/initialized`), tool discovery, reconnection, and graceful shutdown. |
-| `mcp::transport::http` | `backend/src/mcp/transport/http.rs` | HTTP transport — stateless POST-based JSON-RPC. Includes SSRF protection (blocks private IPs: 127/8, 10/8, 172.16/12, 192.168/16), URL validation. |
-| `mcp::transport::sse` | `backend/src/mcp/transport/sse.rs` | SSE transport — persistent GET stream with POST-based request delivery. Receives `endpoint` event for POST URL, correlates responses via JSON-RPC IDs using oneshot channels. |
-| `mcp::transport::stdio` | `backend/src/mcp/transport/stdio.rs` | STDIO transport — spawns child process with newline-delimited JSON-RPC on stdin/stdout. Command allowlist (npx, node, python, python3, uvx, docker). Blocked env vars (LD_PRELOAD, DYLD_*). |
-| `mcp::health_monitor` | `backend/src/mcp/health_monitor.rs` | Background health check per client. Prefers `ping`, falls back to `tools/list`. Tracks consecutive failures, marks client as Error after max failures reached. |
-| `mcp::tool_syncer` | `backend/src/mcp/tool_syncer.rs` | Background tool re-discovery per client (configurable interval). Refreshes tool list from `tools/list` JSON-RPC call. |
-| `mcp::tool_manager` | `backend/src/mcp/tool_manager.rs` | Tool filtering and execution. Two-tier filtering: client config whitelist (`tools_to_execute`) + per-request headers (`x-kgw-mcp-include-clients`, `x-kgw-mcp-include-tools`). Validates client names (no underscores). |
-| `mcp::db` | `backend/src/mcp/db.rs` | `McpDb` — PostgreSQL layer for MCP client configs. Table: `mcp_clients` with columns for connection type, URL/stdio config, auth headers (base64-encoded), tool whitelist, health check settings. |
-| `mcp::types` | `backend/src/mcp/types.rs` | Type definitions: `McpClientConfig`, `McpClientState`, `McpConnectionType` (Http/Sse/Stdio), `McpConnectionState` (Connected/Connecting/Disconnected/Error), `McpAuthType`, `McpTool`, `McpStdioConfig`, `JsonRpcRequest/Response`, `ToolExecuteRequest/Response`, `McpToolInfo`. |
-
 ### Benchmarking
 
 | Module | File(s) | Description |
@@ -275,7 +252,6 @@ All request handlers receive shared application state via Axum's `State` extract
 - `api_key_cache: Arc<DashMap<String, (Uuid, Uuid)>>` — API key hash → (user_id, key_id)
 - `kiro_token_cache: Arc<DashMap<Uuid, (String, String, Instant)>>` — per-user Kiro tokens (4-min TTL)
 - `oauth_pending: Arc<DashMap<String, OAuthPendingState>>` — PKCE state (10-min TTL, 10k cap)
-- `mcp_manager: Option<Arc<McpManager>>` — MCP Gateway orchestrator (None when disabled or not yet initialized)
 - `guardrails_engine: Option<Arc<GuardrailsEngine>>` — Content validation engine (None when disabled or no DB)
 - `provider_registry: Arc<ProviderRegistry>` — resolves provider + credentials per user/model (5-min credential cache)
 - `anthropic_provider: Arc<AnthropicProvider>` — direct Anthropic API provider

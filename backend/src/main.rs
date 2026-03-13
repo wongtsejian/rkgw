@@ -10,7 +10,6 @@ mod datadog;
 mod error;
 mod guardrails;
 mod http_client;
-mod mcp;
 mod middleware;
 mod models;
 mod providers;
@@ -276,7 +275,6 @@ async fn main() -> Result<()> {
         kiro_token_cache: Arc::new(dashmap::DashMap::new()),
         oauth_pending: Arc::new(dashmap::DashMap::new()),
         guardrails_engine: None,
-        mcp_manager: None,
         provider_registry: Arc::new(providers::registry::ProviderRegistry::new()),
         providers: providers::build_provider_map(
             http_client.clone(),
@@ -312,22 +310,6 @@ async fn main() -> Result<()> {
         }
     }
 
-    // ── MCP Gateway (skip in proxy-only mode) ───────────────────────
-    if !is_proxy_only && config.mcp_enabled {
-        if let Some(ref db) = app_state.config_db {
-            let mcp_db = mcp::db::McpDb::new(db.pool().clone());
-            let mgr = mcp::McpManager::new(
-                Arc::new(mcp_db),
-                config.mcp_tool_execution_timeout,
-                config.mcp_health_check_interval,
-                config.mcp_max_consecutive_failures,
-            );
-            mgr.initialize().await;
-            app_state.mcp_manager = Some(Arc::new(mgr));
-            tracing::info!("MCP Gateway initialized");
-        }
-    }
-
     // ── Background tasks (skip in proxy-only mode) ──────────────────
     if !is_proxy_only {
         if let Some(ref db) = app_state.config_db {
@@ -353,9 +335,6 @@ async fn main() -> Result<()> {
             tracing::info!("Background tasks started (token refresh, session cleanup)");
         }
     }
-
-    // Clone mcp_manager reference before moving app_state into the router
-    let mcp_manager_ref = app_state.mcp_manager.clone();
 
     let app = build_app(app_state);
 
@@ -383,11 +362,6 @@ async fn main() -> Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("Server error")?;
-
-    // Gracefully shutdown MCP Gateway (abort background tasks, close transports)
-    if let Some(ref mcp) = mcp_manager_ref {
-        mcp.shutdown().await;
-    }
 
     // Flush and shut down Datadog APM tracer and OTLP metrics (no-op when DD_AGENT_HOST is unset)
     datadog::shutdown(otel_metrics_provider.as_ref());
@@ -497,45 +471,11 @@ fn build_app(state: routes::AppState) -> axum::Router {
 
     let web_ui = web_ui::web_ui_routes(state.clone());
 
-    let mut router = Router::new()
+    Router::new()
         .merge(health_routes)
         .merge(openai_routes)
         .merge(anthropic_routes)
-        .merge(web_ui);
-
-    // Register MCP routes if manager is available
-    if state.mcp_manager.is_some() {
-        use axum::routing::post;
-
-        // /v1/mcp/tool/execute — authenticated tool execution
-        let mcp_tool_routes = Router::new()
-            .route("/v1/mcp/tool/execute", post(mcp::api::execute_tool_handler))
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                middleware::auth_middleware,
-            ))
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                crate::web_ui::setup_guard,
-            ))
-            .with_state(state.clone());
-
-        // /mcp — MCP server endpoint (JSON-RPC POST + SSE GET)
-        let mcp_server_routes = Router::new()
-            .route(
-                "/mcp",
-                post(mcp::server::mcp_post_handler).get(mcp::server::mcp_sse_handler),
-            )
-            .layer(axum::middleware::from_fn_with_state(
-                state.clone(),
-                middleware::auth_middleware,
-            ))
-            .with_state(state.clone());
-
-        router = router.merge(mcp_tool_routes).merge(mcp_server_routes);
-    }
-
-    router
+        .merge(web_ui)
         .layer(middleware::cors_layer())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

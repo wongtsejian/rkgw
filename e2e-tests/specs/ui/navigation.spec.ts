@@ -31,7 +31,6 @@ test.describe('Navigation and layout', () => {
 
     await expect(page.locator(Nav.link, { hasText: 'config' })).toBeVisible()
     await expect(page.locator(Nav.link, { hasText: 'guardrails' })).toBeVisible()
-    await expect(page.locator(Nav.link, { hasText: 'mcp servers' })).toBeVisible()
     await expect(page.locator(Nav.link, { hasText: 'admin' })).toBeVisible()
   })
 
@@ -50,9 +49,6 @@ test.describe('Navigation and layout', () => {
 
     await navigateTo(page, '/guardrails')
     await expect(page.locator('span.page-title')).toContainText('guardrails')
-
-    await navigateTo(page, '/mcp')
-    await expect(page.locator('span.page-title')).toContainText('mcp servers')
   })
 
   test('logout button is visible and clickable', async ({ page }) => {

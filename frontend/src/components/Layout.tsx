@@ -30,7 +30,6 @@ export function Layout() {
   const pageTitle = (() => {
     if (location.pathname.includes('/config')) return 'configuration'
     if (location.pathname.includes('/guardrails')) return 'guardrails'
-    if (location.pathname.includes('/mcp')) return 'mcp servers'
     if (location.pathname.includes('/providers')) return 'providers'
     if (location.pathname.includes('/profile')) return 'profile'
     if (location.pathname.includes('/admin')) return 'administration'

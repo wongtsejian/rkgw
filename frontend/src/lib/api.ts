@@ -357,60 +357,6 @@ export function disconnectQwen() {
   return apiDelete('/providers/qwen/disconnect')
 }
 
-// --- MCP Types ---
-
-export interface McpClientConfig {
-  id: string
-  name: string
-  connection_type: 'http' | 'sse' | 'stdio'
-  connection_string: string | null
-  stdio_config: { command: string; args: string[]; envs: Record<string, string> } | null
-  auth_type: 'none' | 'headers'
-  tools_to_execute: string[]
-  is_ping_available: boolean
-  tool_sync_interval_secs: number
-  enabled: boolean
-}
-
-export interface McpClientState {
-  config: McpClientConfig
-  connection_state: 'connected' | 'connecting' | 'disconnected' | 'error'
-  tools: McpTool[]
-  last_error: string | null
-}
-
-export interface McpTool {
-  name: string
-  description: string | null
-  input_schema: Record<string, unknown>
-}
-
-// --- MCP API ---
-
-export function getMcpClients() {
-  return apiFetch<McpClientState[]>('/admin/mcp/clients')
-}
-
-export function createMcpClient(client: Partial<McpClientConfig>) {
-  return apiPost<McpClientState>('/admin/mcp/client', client)
-}
-
-export function updateMcpClient(id: string, client: Partial<McpClientConfig>) {
-  return apiPut<McpClientState>(`/admin/mcp/client/${id}`, client)
-}
-
-export function deleteMcpClient(id: string) {
-  return apiDelete(`/admin/mcp/client/${id}`)
-}
-
-export function reconnectMcpClient(id: string) {
-  return apiPost<McpClientState>(`/admin/mcp/client/${id}/reconnect`)
-}
-
-export function getMcpClientTools(id: string) {
-  return apiFetch<McpTool[]>(`/admin/mcp/client/${id}/tools`)
-}
-
 // --- Auth (Password + 2FA) API ---
 
 export function getStatus() {

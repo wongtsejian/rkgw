@@ -112,7 +112,6 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .merge(config_api::domain_routes())
         .merge(config_api::user_routes())
         .merge(crate::guardrails::api::guardrails_routes())
-        .nest("/admin/mcp", crate::mcp::api::mcp_admin_routes())
         // Admin password auth: create users, reset passwords
         .route(
             "/admin/users/create",

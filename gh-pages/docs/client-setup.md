@@ -244,7 +244,7 @@ print(message.content[0].text)
 
 Web search does not work through the proxy. The Kiro backend does not support the `tool_use` / `tool_result` round-trip that Claude Code's built-in web search relies on.
 
-**Workaround:** Use MCP servers for web access instead. Add the following to `~/.claude.json`:
+**Workaround:** Use local MCP servers for web access instead. Add the following to `~/.claude.json`:
 
 ```json
 {

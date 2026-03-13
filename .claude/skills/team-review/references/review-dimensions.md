@@ -118,7 +118,7 @@ Detailed checklists for each quality dimension. Reviewers follow the checklist f
 
 - [ ] Runtime config changes via web UI propagate correctly through `Arc<RwLock<Config>>`
 - [ ] Model aliases resolved through `ModelResolver`, never hardcoded model IDs
-- [ ] Feature flags (`mcp_enabled`, `guardrails_enabled`) checked at the right layer
+- [ ] Feature flags (`guardrails_enabled`) checked at the right layer
 - [ ] Proxy-only mode (`config_db: None`) gracefully degrades all DB-dependent features
 
 ### Frontend Structure

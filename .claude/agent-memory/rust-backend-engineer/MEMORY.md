@@ -23,7 +23,7 @@
 
 ### AppState
 - Every `AppState { ... }` struct literal must include ALL fields — check `main.rs`, `routes/mod.rs` tests, `middleware/mod.rs` tests, `web_ui/google_auth.rs` tests
-- After adding new AppState fields, grep for `mcp_manager: None,` to find all test helpers
+- After adding new AppState fields, grep for `guardrails_engine: None,` to find all test helpers
 
 ### ProviderRegistry pattern
 - `get_user_provider_key` returns `Result<Option<(String, String, String)>>` (api_key, key_prefix, label)

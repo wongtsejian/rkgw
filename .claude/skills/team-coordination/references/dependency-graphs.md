@@ -19,11 +19,10 @@ Task C ──┘
 
 ```
 Guardrails CEL rules ──┐
-MCP tool discovery     ──┼──> Integration test
-Metrics dashboard CSS  ──┘
+Metrics dashboard CSS  ──┼──> Integration test
 ```
 
-Each touches separate files (`guardrails/`, `mcp/`, `frontend/src/styles/`) with no overlap.
+Each touches separate files (`guardrails/`, `frontend/src/styles/`) with no overlap.
 
 ---
 
