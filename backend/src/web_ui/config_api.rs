@@ -99,8 +99,12 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
                 )),
             }
         }
-        "fake_reasoning_enabled" | "truncation_recovery" | "guardrails_enabled" | "mcp_enabled"
-        | "auth_google_enabled" | "auth_password_enabled" => {
+        "fake_reasoning_enabled"
+        | "truncation_recovery"
+        | "guardrails_enabled"
+        | "mcp_enabled"
+        | "auth_google_enabled"
+        | "auth_password_enabled" => {
             if value.is_boolean() || value.as_str().is_some_and(|s| s == "true" || s == "false") {
                 Ok(())
             } else {
@@ -278,10 +282,7 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
         "mcp_enabled",
         "Enable MCP Gateway for external tool connections",
     );
-    m.insert(
-        "auth_google_enabled",
-        "Enable Google SSO authentication",
-    );
+    m.insert("auth_google_enabled", "Enable Google SSO authentication");
     m.insert(
         "auth_password_enabled",
         "Enable username/password authentication",
