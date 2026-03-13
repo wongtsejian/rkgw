@@ -39,6 +39,7 @@ description: Reference guide for team composition patterns, file ownership rules
 | `frontend/src/components/*` | react-frontend-engineer | UI components |
 | `frontend/src/lib/*` | react-frontend-engineer | Frontend utilities |
 | `frontend/src/styles/*` | react-frontend-engineer | CSS styles |
+| `backend/src/web_ui/config_db.rs` (DDL) | database-engineer | Schema migrations, table creation |
 | `docker-compose*.yml` | devops-engineer | Docker config |
 | `**/Dockerfile` | devops-engineer | Container builds |
 
@@ -99,7 +100,7 @@ E2E Tests
 | Agent A | Agent B | Why It's Safe |
 |---------|---------|---------------|
 | Backend converter logic | Frontend UI mockup (agreed API shape) | Interface contract isolates work |
-| Guardrails engine | MCP client manager | Independent modules, separate files |
+| Guardrails engine | Config persistence | Independent modules, separate files |
 | Backend auth changes | Frontend CSS/styling | No runtime dependency |
 | Backend unit tests | Frontend E2E test setup | Independent test infrastructure |
 
@@ -118,15 +119,18 @@ interface Metrics { totalRequests: number; avgLatencyMs: number; }
 
 ## 5. Harbangan Team Presets
 
-| Preset | Agents | Use When |
-|--------|--------|----------|
-| `fullstack` | scrum-master + rust-backend + react-frontend + frontend-qa | Full-stack feature |
-| `backend-feature` | scrum-master + rust-backend + backend-qa | Backend-only feature |
-| `frontend-feature` | scrum-master + react-frontend + frontend-qa | Frontend-only feature |
-| `review` | rust-backend + react-frontend + backend-qa | Code review |
-| `debug` | rust-backend + react-frontend + devops | Debugging |
-| `infra` | scrum-master + devops + rust-backend | Infrastructure changes |
-| `docs` | scrum-master + document-writer | Documentation |
+| Preset | Composition | Use When |
+|--------|-------------|----------|
+| `fullstack` | coordinator + all service agents + QA agents | Full-stack feature touching backend + frontend |
+| `backend-feature` | coordinator + backend + database + backend-qa | Backend-only feature |
+| `frontend-feature` | coordinator + frontend + frontend-qa | Frontend-only feature |
+| `infra` | coordinator + infra + backend | Infrastructure changes |
+| `docs` | coordinator + document-writer | Documentation |
+| `research` | 3 general-purpose agents | Codebase exploration, investigation |
+| `security` | 4 reviewer agents (OWASP, auth, deps, config) | Security audit |
+| `migration` | coordinator + 2 service agents + 1 reviewer | Data/schema migration |
+| `refactor` | coordinator + 2 service agents + 1 reviewer | Code refactoring |
+| `hotfix` | 1 service agent + 1 QA agent | Urgent bug fix |
 
 ---
 

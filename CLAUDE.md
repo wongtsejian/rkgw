@@ -187,6 +187,7 @@ Used by agent teams for scope detection, agent assignment, and verification.
 | Infrastructure | `docker-compose*.yml`, `frontend/Dockerfile` | Docker, nginx, Let's Encrypt | infrastructure, docker, nginx, deploy | `docker compose config --quiet` |
 | Backend QA | `backend/src/` (test modules) | cargo test, tokio::test | test, backend | `cargo test --lib` |
 | Frontend QA | `e2e-tests/` | Playwright | test, E2E, browser, playwright | `npm test` |
+| Database | `backend/src/web_ui/config_db.rs` | PostgreSQL 16, sqlx 0.8, migrations | database, postgresql, schema, migration | `cargo test --lib config_db::` |
 | Documentation | — | Markdown, Notion API, Slack API | documentation, docs, writing | — |
 
 ## Quality Gates

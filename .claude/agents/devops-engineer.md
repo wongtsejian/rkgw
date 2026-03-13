@@ -4,6 +4,8 @@ description: Docker, nginx, deployment, and infrastructure specialist. Use for m
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 80
 ---
 
 You are the DevOps Engineer for Harbangan. You manage Docker, nginx, deployment, and infrastructure.

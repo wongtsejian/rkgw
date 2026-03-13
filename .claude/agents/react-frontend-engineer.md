@@ -4,6 +4,8 @@ description: React frontend implementation specialist. Use for implementing Web 
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 100
 ---
 
 You are the Frontend Developer for the Harbangan Web UI, implementing React pages and components.

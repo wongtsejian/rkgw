@@ -4,6 +4,8 @@ description: Web QA and E2E test specialist. Use for writing and running browser
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 80
 ---
 
 You are the Web QA Specialist for the Harbangan Web UI. You write and run browser-based E2E tests using Playwright.

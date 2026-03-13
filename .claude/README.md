@@ -9,8 +9,8 @@ This directory is the AI workflow infrastructure for Harbangan. It provides a fu
 ├── CLAUDE.md                    # Quick reference (structure + skill table)
 ├── README.md                    # This file (full documentation)
 ├── settings.json                # Claude Code configuration
-├── agents/                      # 7 agent definitions
-├── skills/                      # 9 invocable skills
+├── agents/                      # 8 agent definitions
+├── skills/                      # 6 invocable skills
 ├── agent-memory/                # Persistent per-agent memory
 ├── rules/                       # Coding standards + plan mode rules
 └── plans/                       # Implementation plans
@@ -18,61 +18,70 @@ This directory is the AI workflow infrastructure for Harbangan. It provides a fu
 
 ---
 
-## Agents (7 total)
+## Agents (8 total)
 
-Each agent is a `.md` file with YAML frontmatter defining its name, description, tools, model, and memory scope. The body contains domain-specific context.
+Each agent is a `.md` file with YAML frontmatter defining its name, description, tools, model, memory scope, `permissionMode`, and `maxTurns`. The body contains domain-specific context. All agents run with `permissionMode: bypassPermissions` for autonomous execution.
 
-### Implementation Agents (4)
+### Implementation Agents (5)
 
-| Agent | Service | Stack | Model |
-|-------|---------|-------|-------|
-| `rust-backend-engineer` | Backend (`backend/`) | Rust, Axum 0.7, Tokio, sqlx, PostgreSQL | inherit |
-| `react-frontend-engineer` | Frontend (`frontend/`) | React 19, TypeScript 5.9, Vite 7 | inherit |
-| `devops-engineer` | Infrastructure | Docker, nginx, Let's Encrypt | inherit |
-| `document-writer` | Documentation | Notion API, Slack API, Markdown | inherit |
+| Agent | Service | Stack | maxTurns |
+|-------|---------|-------|----------|
+| `rust-backend-engineer` | Backend (`backend/`) | Rust, Axum 0.7, Tokio, sqlx, PostgreSQL | 100 |
+| `react-frontend-engineer` | Frontend (`frontend/`) | React 19, TypeScript 5.9, Vite 7 | 100 |
+| `database-engineer` | Database (`config_db.rs`) | PostgreSQL 16, sqlx 0.8, migrations | 80 |
+| `devops-engineer` | Infrastructure | Docker, nginx, Let's Encrypt | 80 |
+| `document-writer` | Documentation | Notion API, Slack API, Markdown | 60 |
 
 ### Quality Agents (2)
 
-| Agent | Scope | Focus |
-|-------|-------|-------|
-| `backend-qa` | `backend/src/` tests | cargo test, 395+ unit tests, tokio::test |
-| `frontend-qa` | `frontend/` | Playwright E2E tests, browser testing |
+| Agent | Scope | Focus | maxTurns |
+|-------|-------|-------|----------|
+| `backend-qa` | `backend/src/` tests | cargo test, 395+ unit tests, tokio::test | 80 |
+| `frontend-qa` | `frontend/` | Playwright E2E tests, browser testing | 80 |
 
 ### Orchestration Agent (1)
 
-| Agent | Role | Model |
-|-------|------|-------|
-| `scrum-master` | Workflow coordinator — decomposes tasks, spawns teams, monitors progress | opus |
+| Agent | Role | maxTurns |
+|-------|------|----------|
+| `scrum-master` | Workflow coordinator — decomposes tasks, spawns teams, monitors progress | 100 |
 
 ---
 
-## Skills (9 total)
+## Skills (6 total)
 
 Skills are invocable via `/skill-name [arguments]`.
 
-### Team Skills (7) — Multi-Agent Orchestration
+### Team Skills (4) — Multi-Agent Orchestration
 
 | Skill | Purpose | Key Arguments |
 |-------|---------|---------------|
-| `/team-spawn` | Spawn team from presets | `[preset] [--delegate]` |
-| `/team-feature` | Full feature orchestration | `"description" [--preset name] [--plan-first]` |
-| `/team-delegate` | Task assignment dashboard | `team-name [--assign\|--message\|--broadcast]` |
-| `/team-status` | Show team status | `[team-name] [--tasks] [--members] [--json]` |
+| `/team-plan` | Analyze scope, explore codebase, produce plans | `"description" [--scope path]` |
+| `/team-implement` | Full lifecycle: spawn → assign → verify → PR → shutdown | `"description" [--preset name] [--worktree]` |
 | `/team-review` | Multi-dimensional code review | `[target] [--preset name] [--base branch]` |
 | `/team-debug` | Hypothesis-driven debugging | `"error" [--scope path] [--hypotheses N]` |
-| `/team-shutdown` | Graceful team termination | `team-name [--force] [--keep-config]` |
+
+**team-implement sub-commands:**
+
+| Flag | Purpose |
+|------|---------|
+| `--status team-name` | Show team status (replaces /team-status) |
+| `--delegate team-name` | Task assignment dashboard (replaces /team-delegate) |
+| `--shutdown team-name` | Graceful team termination (replaces /team-shutdown) |
 
 **Team presets:**
 
-| Preset | Members | Use Case |
-|--------|---------|----------|
-| `fullstack` | scrum-master + rust-backend + react-frontend + frontend-qa | Full-stack feature |
-| `backend-feature` | scrum-master + rust-backend + backend-qa | Backend-only feature |
-| `frontend-feature` | scrum-master + react-frontend + frontend-qa | Frontend-only feature |
-| `review` | rust-backend + react-frontend + backend-qa | Code review |
-| `debug` | rust-backend + react-frontend + devops | Debugging |
-| `infra` | scrum-master + devops + rust-backend | Infrastructure changes |
-| `docs` | scrum-master + document-writer | Documentation |
+| Preset | Composition | Use When |
+|--------|-------------|----------|
+| `fullstack` | coordinator + all service agents + QA agents | Full-stack feature |
+| `backend-feature` | coordinator + backend + database + backend-qa | Backend-only feature |
+| `frontend-feature` | coordinator + frontend + frontend-qa | Frontend-only feature |
+| `infra` | coordinator + infra + backend | Infrastructure changes |
+| `docs` | coordinator + document-writer | Documentation |
+| `research` | 3 general-purpose agents | Codebase exploration |
+| `security` | 4 reviewer agents | Security audit |
+| `migration` | coordinator + 2 service + 1 reviewer | Data/schema migration |
+| `refactor` | coordinator + 2 service + 1 reviewer | Code refactoring |
+| `hotfix` | 1 service + 1 QA agent | Urgent bug fix |
 
 ### Other Skills (2)
 
@@ -90,24 +99,27 @@ Skills are invocable via `/skill-name [arguments]`.
 ### Planning to Execution Flow
 
 ```
-Plan mode (explore + design)  →  /team-spawn {preset}
-                              →  or /team-feature {title}
-TaskList (task decomposition)  →  /team-delegate (assign to agents)
-/team-status                   →  monitor progress
+/team-plan (explore + design)   →  produce plan in .claude/plans/
+/team-implement {plan}         →  spawn → assign → verify → PR → shutdown
+GitHub Issues (persistent)     →  gh issue create for each task
+TaskList (ephemeral, [#N] refs)→  /team-implement --delegate (assign to agents)
+/team-implement --status       →  monitor progress (TaskList + GitHub Issues)
 Quality Gates (from CLAUDE.md) →  verify completion
-/team-shutdown                 →  clean up
+gh issue close #N              →  sync completion to GitHub
+/team-implement --shutdown     →  persist to GitHub, clean up ephemeral state
 ```
 
 ### Scrum Master Workflow
 
 ```
-1. Read CLAUDE.md Service Map     — identify affected services
-2. Read .claude/agents/*.md       — match services to agents
-3. Decompose into TaskList items  — wave-based ordering
-4. /team-spawn {preset}           — spawn the right team
-5. /team-delegate                 — assign tasks with dependencies
-6. /team-status                   — monitor progress
-7. Verify against Quality Gates   — from CLAUDE.md
+ 1. gh issue list                       — check existing issues for related work
+ 2. /team-plan "description"            — analyze scope, explore codebase, produce plan
+ 3. /team-implement "plan" --preset X   — full lifecycle: spawn → assign → verify → PR
+ 4. /team-implement --status            — monitor progress (TaskList + GitHub Issues)
+ 5. /team-implement --delegate          — assign tasks, send messages
+ 6. Verify against Quality Gates        — from CLAUDE.md
+ 7. gh issue close #N                   — close issues, link PRs with "Closes #N"
+ 8. /team-implement --shutdown          — persist to GitHub, clean up
 ```
 
 ---

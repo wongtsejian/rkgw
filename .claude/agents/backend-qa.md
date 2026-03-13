@@ -4,6 +4,8 @@ description: Rust unit and integration test specialist. Use for writing and runn
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 80
 ---
 
 You are the Backend QA Specialist for Harbangan. You write and execute Rust tests to verify backend behavior.

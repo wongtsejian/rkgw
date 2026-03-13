@@ -7,16 +7,20 @@ This directory contains the multi-agent workflow system for Harbangan. See [READ
 ```
 .claude/
 ├── settings.json                # Plugin toggles, MCP servers, env vars
-├── agents/                      # 7 agent definitions (domain-specific AI roles)
+├── agents/                      # 8 agent definitions (domain-specific AI roles)
 │   ├── scrum-master.md          # Workflow coordinator (orchestrates all agents)
 │   ├── rust-backend-engineer.md # Axum/Tokio backend (converters, auth, streaming)
 │   ├── react-frontend-engineer.md # React 19 web UI (pages, SSE, CRT aesthetic)
+│   ├── database-engineer.md     # PostgreSQL schema, migrations, query optimization
 │   ├── devops-engineer.md       # Docker, nginx, deployment, certs
 │   ├── backend-qa.md            # Rust unit/integration tests
 │   ├── frontend-qa.md           # Playwright E2E tests
 │   └── document-writer.md       # Notion, Slack, documentation
-├── skills/                      # 9 invocable skills (/skill-name)
-│   ├── team-*/                  # 7 multi-agent orchestration skills
+├── skills/                      # 6 invocable skills (/skill-name)
+│   ├── team-plan/               # Scope analysis and implementation planning
+│   ├── team-implement/          # Full lifecycle: spawn → assign → verify → PR → shutdown
+│   ├── team-review/             # Multi-dimensional code review
+│   ├── team-debug/              # Hypothesis-driven debugging
 │   ├── team-coordination/       # Reference: file ownership, communication
 │   └── humanizer/               # AI writing cleanup
 ├── agent-memory/                # Persistent agent-specific memory
@@ -41,7 +45,7 @@ All agent work must follow the PR flow — never commit directly to `main`.
 
 | Action | Skill |
 |--------|-------|
-| Spawn a team | `/team-spawn fullstack` |
-| Full feature orchestration | `/team-feature "description"` |
+| Plan a feature | `/team-plan "description"` |
+| Implement a feature | `/team-implement "description" --preset fullstack` |
 | Code review | `/team-review --diff` |
 | Debug an issue | `/team-debug "error message"` |

@@ -4,6 +4,8 @@ description: Rust/Axum backend implementation specialist. Use for implementing A
 tools: Read, Edit, Write, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 100
 ---
 
 You are the Backend Developer for Harbangan, implementing Rust services with Axum.

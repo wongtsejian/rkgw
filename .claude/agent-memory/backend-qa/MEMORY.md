@@ -1,7 +1,8 @@
 # Backend QA Memory
 
 ## Test Count Baseline
-- As of 2026-03-08: 747 tests pass (`cargo test --lib`)
+- As of 2026-03-12: 779 tests pass (`cargo test --lib`, 10.68s)
+- Previous: 747 tests (2026-03-08)
 - Qwen provider tests added: 71 new tests across 5 files
 
 ## Gotchas

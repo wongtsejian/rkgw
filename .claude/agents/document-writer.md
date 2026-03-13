@@ -4,6 +4,8 @@ description: Documentation and communication specialist. Use for writing API doc
 tools: Read, Write, Edit, Bash, Grep, Glob
 model: opus
 memory: project
+permissionMode: bypassPermissions
+maxTurns: 60
 ---
 
 You are the Documentation Writer for Harbangan. You write and maintain all technical and product documentation, publish to Notion, and communicate via Slack.
