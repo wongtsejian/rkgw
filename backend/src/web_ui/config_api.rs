@@ -32,7 +32,9 @@ pub fn classify_config_change(key: &str) -> ChangeType {
         | "mcp_tool_execution_timeout"
         | "mcp_health_check_interval"
         | "mcp_tool_sync_interval"
-        | "mcp_max_consecutive_failures" => ChangeType::HotReload,
+        | "mcp_max_consecutive_failures"
+        | "auth_google_enabled"
+        | "auth_password_enabled" => ChangeType::HotReload,
         "server_host"
         | "server_port"
         | "streaming_timeout"
@@ -97,7 +99,8 @@ pub fn validate_config_field(key: &str, value: &serde_json::Value) -> Result<(),
                 )),
             }
         }
-        "fake_reasoning_enabled" | "truncation_recovery" | "guardrails_enabled" | "mcp_enabled" => {
+        "fake_reasoning_enabled" | "truncation_recovery" | "guardrails_enabled" | "mcp_enabled"
+        | "auth_google_enabled" | "auth_password_enabled" => {
             if value.is_boolean() || value.as_str().is_some_and(|s| s == "true" || s == "false") {
                 Ok(())
             } else {
@@ -274,6 +277,14 @@ pub fn get_config_field_descriptions() -> HashMap<&'static str, &'static str> {
     m.insert(
         "mcp_enabled",
         "Enable MCP Gateway for external tool connections",
+    );
+    m.insert(
+        "auth_google_enabled",
+        "Enable Google SSO authentication",
+    );
+    m.insert(
+        "auth_password_enabled",
+        "Enable username/password authentication",
     );
     m.insert(
         "mcp_tool_execution_timeout",
