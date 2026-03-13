@@ -50,6 +50,7 @@ const QWEN_OAUTH_SCOPE: &str = "openid profile email model.completion";
 /// In-memory pending state for a Qwen device flow.
 #[derive(Debug, Clone)]
 pub struct QwenDevicePending {
+    #[allow(dead_code)]
     pub device_code: String,
     pub code_verifier: String,
     pub user_id: Uuid,

@@ -1,4 +1,4 @@
-// Integration tests for Kiro Gateway
+// Integration tests for Harbangan Gateway
 //
 // These tests verify the full HTTP stack including routing, middleware,
 // request parsing, and response formatting.
@@ -10,21 +10,20 @@ use axum::{
 };
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::collections::VecDeque;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::RwLock;
 use tower::ServiceExt;
 
-use kiro_gateway::{
+use harbangan::{
     auth::AuthManager,
     cache::ModelCache,
     config::Config,
     http_client::KiroHttpClient,
-    metrics::MetricsCollector,
+    providers,
     resolver::ModelResolver,
     routes::{self, AppState},
+    web_ui::provider_oauth::HttpTokenExchanger,
 };
 
 // ==================================================================================================
@@ -74,13 +73,14 @@ fn create_test_app_state() -> AppState {
         http_connect_timeout: 30,
         http_request_timeout: 300,
         http_max_retries: 3,
-        debug_mode: kiro_gateway::config::DebugMode::Off,
+        debug_mode: harbangan::config::DebugMode::Off,
         log_level: "info".to_string(),
         tool_description_max_length: 10000,
         fake_reasoning_enabled: true,
         fake_reasoning_max_tokens: 4000,
-        fake_reasoning_handling: kiro_gateway::config::FakeReasoningHandling::AsReasoningContent,
+        fake_reasoning_handling: harbangan::config::FakeReasoningHandling::AsReasoningContent,
         truncation_recovery: true,
+        default_provider: "kiro".to_string(),
         guardrails_enabled: false,
         mcp_enabled: false,
         mcp_tool_execution_timeout: 30,
@@ -99,7 +99,7 @@ fn create_test_app_state() -> AppState {
         google_callback_url: String::new(),
     };
 
-    let metrics = Arc::new(MetricsCollector::new());
+    let config_arc = Arc::new(RwLock::new(config));
 
     // Pre-populate the api_key_cache with our test key hash
     let api_key_cache = Arc::new(dashmap::DashMap::new());
@@ -125,13 +125,11 @@ fn create_test_app_state() -> AppState {
 
     AppState {
         model_cache: cache,
-        auth_manager,
-        http_client,
+        auth_manager: auth_manager.clone(),
+        http_client: http_client.clone(),
         resolver,
-        config: Arc::new(RwLock::new(config)),
+        config: config_arc.clone(),
         setup_complete: Arc::new(AtomicBool::new(true)),
-        metrics,
-        log_buffer: Arc::new(Mutex::new(VecDeque::new())),
         config_db: None,
         session_cache: Arc::new(dashmap::DashMap::new()),
         api_key_cache,
@@ -139,6 +137,10 @@ fn create_test_app_state() -> AppState {
         oauth_pending: Arc::new(dashmap::DashMap::new()),
         guardrails_engine: None,
         mcp_manager: None,
+        provider_registry: Arc::new(providers::registry::ProviderRegistry::new()),
+        providers: providers::build_provider_map(http_client, auth_manager, config_arc),
+        provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
+        token_exchanger: Arc::new(HttpTokenExchanger::new()),
     }
 }
 

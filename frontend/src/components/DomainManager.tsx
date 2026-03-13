@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { apiFetch, apiPost, apiDelete } from '../lib/api'
 import type { DomainInfo } from '../lib/api'
-import { useToast } from './Toast'
+import { useToast } from './useToast'
 
 export function DomainManager() {
   const { showToast } = useToast()

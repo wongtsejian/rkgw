@@ -312,6 +312,7 @@ pub fn qwen_static_models() -> Vec<RegistryModel> {
 }
 
 /// Get all static models across all providers.
+#[allow(dead_code)]
 pub fn all_static_models() -> Vec<RegistryModel> {
     let mut models = Vec::new();
     models.extend(anthropic_static_models());

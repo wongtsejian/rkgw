@@ -7,6 +7,49 @@ use uuid::Uuid;
 
 use crate::config::{Config, DebugMode};
 
+/// Query row for expiring Kiro tokens with OAuth credentials.
+type KiroTokenOAuthRow = (Uuid, String, Option<String>, Option<String>, Option<String>);
+
+/// Query row for a model registry entry (13-column tuple).
+type RegistryModelRow = (
+    Uuid,
+    String,
+    String,
+    String,
+    String,
+    i32,
+    i32,
+    serde_json::Value,
+    bool,
+    String,
+    Option<serde_json::Value>,
+    DateTime<Utc>,
+    DateTime<Utc>,
+);
+
+/// Query row for Copilot tokens (7-column tuple).
+type CopilotTokenQueryRow = (
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    Option<i64>,
+);
+
+/// Query row for expiring Copilot tokens (8-column tuple, includes user_id).
+type CopilotTokenExpiringRow = (
+    Uuid,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<DateTime<Utc>>,
+    Option<i64>,
+);
+
 /// A row from the `user_copilot_tokens` table.
 #[derive(Debug, Clone)]
 pub struct CopilotTokenRow {
@@ -17,6 +60,7 @@ pub struct CopilotTokenRow {
     pub copilot_plan: Option<String>,
     pub base_url: Option<String>,
     pub expires_at: Option<DateTime<Utc>>,
+    #[allow(dead_code)]
     pub refresh_in: Option<i64>,
 }
 
@@ -1416,18 +1460,15 @@ impl ConfigDb {
 
     /// Get expiring tokens with per-user OAuth credentials for refresh.
     #[allow(dead_code)]
-    pub async fn get_expiring_kiro_tokens_with_oauth(
-        &self,
-    ) -> Result<Vec<(Uuid, String, Option<String>, Option<String>, Option<String>)>> {
-        let rows: Vec<(Uuid, String, Option<String>, Option<String>, Option<String>)> =
-            sqlx::query_as(
-                "SELECT user_id, refresh_token, oauth_client_id, oauth_client_secret, oauth_sso_region
+    pub async fn get_expiring_kiro_tokens_with_oauth(&self) -> Result<Vec<KiroTokenOAuthRow>> {
+        let rows: Vec<KiroTokenOAuthRow> = sqlx::query_as(
+            "SELECT user_id, refresh_token, oauth_client_id, oauth_client_secret, oauth_sso_region
                  FROM user_kiro_tokens
                  WHERE token_expiry IS NOT NULL AND token_expiry < NOW() + INTERVAL '5 minutes'",
-            )
-            .fetch_all(&self.pool)
-            .await
-            .context("Failed to get expiring Kiro tokens with OAuth")?;
+        )
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to get expiring Kiro tokens with OAuth")?;
 
         Ok(rows)
     }
@@ -1903,21 +1944,7 @@ impl ConfigDb {
     /// Get all models in the registry.
     #[allow(dead_code)]
     pub async fn get_all_registry_models(&self) -> Result<Vec<RegistryModel>> {
-        let rows: Vec<(
-            Uuid,
-            String,
-            String,
-            String,
-            String,
-            i32,
-            i32,
-            serde_json::Value,
-            bool,
-            String,
-            Option<serde_json::Value>,
-            DateTime<Utc>,
-            DateTime<Utc>,
-        )> = sqlx::query_as(
+        let rows: Vec<RegistryModelRow> = sqlx::query_as(
             "SELECT id, provider_id, model_id, display_name, prefixed_id,
                     context_length, max_output_tokens, capabilities, enabled,
                     source, upstream_meta, created_at, updated_at
@@ -1934,21 +1961,7 @@ impl ConfigDb {
     /// Get only enabled models.
     #[allow(dead_code)]
     pub async fn get_enabled_registry_models(&self) -> Result<Vec<RegistryModel>> {
-        let rows: Vec<(
-            Uuid,
-            String,
-            String,
-            String,
-            String,
-            i32,
-            i32,
-            serde_json::Value,
-            bool,
-            String,
-            Option<serde_json::Value>,
-            DateTime<Utc>,
-            DateTime<Utc>,
-        )> = sqlx::query_as(
+        let rows: Vec<RegistryModelRow> = sqlx::query_as(
             "SELECT id, provider_id, model_id, display_name, prefixed_id,
                     context_length, max_output_tokens, capabilities, enabled,
                     source, upstream_meta, created_at, updated_at
@@ -2107,23 +2120,7 @@ impl ConfigDb {
     }
 
     /// Convert a query row tuple into a `RegistryModel`.
-    fn row_to_registry_model(
-        row: (
-            Uuid,
-            String,
-            String,
-            String,
-            String,
-            i32,
-            i32,
-            serde_json::Value,
-            bool,
-            String,
-            Option<serde_json::Value>,
-            DateTime<Utc>,
-            DateTime<Utc>,
-        ),
-    ) -> RegistryModel {
+    fn row_to_registry_model(row: RegistryModelRow) -> RegistryModel {
         RegistryModel {
             id: row.0,
             provider_id: row.1,
@@ -2145,6 +2142,7 @@ impl ConfigDb {
 
     /// Upsert a user's Copilot tokens (GitHub OAuth + Copilot bearer).
     #[allow(dead_code)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn upsert_copilot_tokens(
         &self,
         user_id: Uuid,
@@ -2188,7 +2186,7 @@ impl ConfigDb {
     /// Get a user's Copilot tokens.
     #[allow(dead_code)]
     pub async fn get_copilot_tokens(&self, user_id: Uuid) -> Result<Option<CopilotTokenRow>> {
-        let row: Option<(String, Option<String>, Option<String>, Option<String>, Option<String>, Option<DateTime<Utc>>, Option<i64>)> = sqlx::query_as(
+        let row: Option<CopilotTokenQueryRow> = sqlx::query_as(
             "SELECT github_token, github_username, copilot_token, copilot_plan, base_url, expires_at, refresh_in
              FROM user_copilot_tokens
              WHERE user_id = $1",
@@ -2250,7 +2248,7 @@ impl ConfigDb {
     /// Get all Copilot tokens expiring within 5 minutes (for background refresh).
     #[allow(dead_code)]
     pub async fn get_expiring_copilot_tokens(&self) -> Result<Vec<CopilotTokenRow>> {
-        let rows: Vec<(Uuid, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<DateTime<Utc>>, Option<i64>)> = sqlx::query_as(
+        let rows: Vec<CopilotTokenExpiringRow> = sqlx::query_as(
             "SELECT user_id, github_token, github_username, copilot_token, copilot_plan, base_url, expires_at, refresh_in
              FROM user_copilot_tokens
              WHERE copilot_token IS NOT NULL

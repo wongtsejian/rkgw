@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react'
 import { apiFetch, apiPut } from '../lib/api'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 
 interface HistoryEntry {
   key?: string
@@ -124,6 +124,12 @@ export function Config() {
   const [dirty, setDirty] = useState(false)
   const savedSnapshot = useRef<string>('')
 
+  function loadHistory() {
+    apiFetch<{ history: HistoryEntry[] }>('/config/history')
+      .then(data => setHistory(data.history || []))
+      .catch(() => {})
+  }
+
   useEffect(() => {
     apiFetch<{ setup_complete: boolean; config: Record<string, unknown> }>('/config')
       .then(data => {
@@ -136,13 +142,7 @@ export function Config() {
         setLoading(false)
       })
     loadHistory()
-  }, [])
-
-  function loadHistory() {
-    apiFetch<{ history: HistoryEntry[] }>('/config/history')
-      .then(data => setHistory(data.history || []))
-      .catch(() => {})
-  }
+  }, [showToast])
 
   function handleChange(key: string, value: unknown) {
     setValues(prev => {

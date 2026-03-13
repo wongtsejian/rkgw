@@ -45,6 +45,7 @@ const GITHUB_API_VERSION: &str = "2025-04-01";
 /// In-memory pending state for a Copilot device flow.
 #[derive(Debug, Clone)]
 pub struct CopilotDevicePending {
+    #[allow(dead_code)]
     pub device_code: String,
     pub user_id: Uuid,
     pub created_at: chrono::DateTime<Utc>,
@@ -498,8 +499,7 @@ pub fn spawn_copilot_token_refresh_task(
                     Ok(resp) => {
                         let expires_at = resp
                             .expires_at
-                            .map(|ts| chrono::DateTime::from_timestamp(ts, 0))
-                            .flatten();
+                            .and_then(|ts| chrono::DateTime::from_timestamp(ts, 0));
 
                         let plan = row.copilot_plan.as_deref();
                         let base_url = row.base_url.as_deref().unwrap_or_else(|| {

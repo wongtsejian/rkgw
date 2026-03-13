@@ -10,6 +10,7 @@ use crate::models::openai::{ChatCompletionRequest, ChatMessage};
 /// - `max_tokens` → `max_tokens`
 /// - `temperature`, `top_p` are passed through when present
 /// - `stop_sequences` → `stop` (as a JSON array)
+#[allow(dead_code)]
 pub fn anthropic_to_openai(req: &AnthropicMessagesRequest) -> ChatCompletionRequest {
     let mut messages: Vec<ChatMessage> = Vec::new();
 

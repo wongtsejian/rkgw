@@ -6,7 +6,7 @@ import {
   populateModels,
 } from '../lib/api'
 import type { RegistryModel } from '../lib/api'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 
 interface ProviderGroup {
   providerId: string

@@ -60,6 +60,7 @@ impl std::str::FromStr for ProviderId {
 /// Per-user credentials resolved at request time.
 #[derive(Debug, Clone)]
 pub struct ProviderCredentials {
+    #[allow(dead_code)]
     pub provider: ProviderId,
     pub access_token: String,
     /// Override the default API endpoint (optional).

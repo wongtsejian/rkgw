@@ -144,6 +144,7 @@ fn validate_provider(provider: &str) -> Result<(), ApiError> {
 }
 
 /// Validate that a domain string is safe for shell interpolation.
+#[allow(dead_code)]
 fn validate_domain(domain: &str) -> Result<(), ApiError> {
     if domain.is_empty() {
         return Err(ApiError::ConfigError("DOMAIN is not configured".into()));

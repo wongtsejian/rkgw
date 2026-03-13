@@ -113,6 +113,7 @@ impl ModelResolver {
     /// - Models with a known direct-provider prefix (e.g. "gpt-5", "gemini-2.5-pro")
     ///
     /// Returns `true` for Claude models and unknown models that default to Kiro.
+    #[allow(dead_code)]
     pub fn is_kiro_model(model: &str) -> bool {
         // Explicit prefix → not Kiro
         if ProviderRegistry::parse_prefixed_model(model).is_some() {

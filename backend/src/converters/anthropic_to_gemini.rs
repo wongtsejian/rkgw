@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 /// - `user` role messages → `contents` with role `user`
 /// - `max_tokens` → `generationConfig.maxOutputTokens` (if > 0)
 /// - Content can be a string or an array of text blocks
+#[allow(dead_code)]
 pub fn anthropic_to_gemini(req: &AnthropicMessagesRequest) -> Value {
     let mut contents: Vec<Value> = Vec::new();
 
@@ -45,6 +46,7 @@ pub fn anthropic_to_gemini(req: &AnthropicMessagesRequest) -> Value {
     body
 }
 
+#[allow(dead_code)]
 fn extract_text(value: &Value) -> String {
     if let Some(s) = value.as_str() {
         s.to_string()

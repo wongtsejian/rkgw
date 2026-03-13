@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { apiFetch, apiPut, apiDelete } from '../lib/api'
 import type { UserDetailResponse } from '../lib/api'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 
 export function UserDetail() {
   const { userId } = useParams<{ userId: string }>()
@@ -16,7 +16,7 @@ export function UserDetail() {
       .then(setData)
       .catch(() => showToast('Failed to load user', 'error'))
       .finally(() => setLoading(false))
-  }, [userId])
+  }, [userId, showToast])
 
   async function handleRoleToggle() {
     if (!data) return

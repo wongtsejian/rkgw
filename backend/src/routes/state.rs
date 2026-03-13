@@ -23,6 +23,7 @@ use crate::web_ui::provider_oauth::{ProviderOAuthPendingState, TokenExchanger};
 pub struct UserKiroCreds {
     pub user_id: Uuid,
     pub access_token: String,
+    #[allow(dead_code)]
     pub refresh_token: String,
     pub region: String,
 }
@@ -55,6 +56,7 @@ pub struct AppState {
     pub model_cache: ModelCache,
     pub auth_manager: Arc<tokio::sync::RwLock<AuthManager>>,
     pub http_client: Arc<KiroHttpClient>,
+    #[allow(dead_code)]
     pub resolver: ModelResolver,
     pub config: Arc<RwLock<Config>>,
     pub setup_complete: Arc<AtomicBool>,

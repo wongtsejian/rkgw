@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { getQwenStatus, startQwenDeviceFlow, pollQwenDeviceCode, disconnectQwen } from '../lib/api'
 import type { QwenStatus, QwenDeviceCodeResponse } from '../lib/api'
 import { DeviceCodeDisplay } from './DeviceCodeDisplay'
-import { useToast } from './Toast'
+import { useToast } from './useToast'
 
 export function QwenSetup() {
   const { showToast } = useToast()

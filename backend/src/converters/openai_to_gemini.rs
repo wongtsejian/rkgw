@@ -11,6 +11,7 @@ use serde_json::{json, Value};
 /// - `user` role messages → `contents` with role `user`
 /// - `max_tokens` → `generationConfig.maxOutputTokens`
 /// - `temperature` → `generationConfig.temperature`
+#[allow(dead_code)]
 pub fn openai_to_gemini(req: &ChatCompletionRequest) -> Value {
     let mut system_instruction: Option<String> = None;
     let mut contents: Vec<Value> = Vec::new();

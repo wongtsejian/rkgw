@@ -274,8 +274,8 @@ mod tests {
         let delay2 = client.calculate_backoff_delay(2);
 
         // Each delay should be roughly double the previous (with jitter)
-        assert!(delay0 >= 1000 && delay0 <= 1200); // ~1s with jitter
-        assert!(delay1 >= 2000 && delay1 <= 2400); // ~2s with jitter
-        assert!(delay2 >= 4000 && delay2 <= 4800); // ~4s with jitter
+        assert!((1000..=1200).contains(&delay0)); // ~1s with jitter
+        assert!((2000..=2400).contains(&delay1)); // ~2s with jitter
+        assert!((4000..=4800).contains(&delay2)); // ~4s with jitter
     }
 }

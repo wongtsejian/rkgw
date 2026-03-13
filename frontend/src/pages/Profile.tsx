@@ -4,7 +4,7 @@ import { CopilotSetup } from '../components/CopilotSetup'
 import { QwenSetup } from '../components/QwenSetup'
 import { ApiKeyManager } from '../components/ApiKeyManager'
 import { useSession } from '../components/SessionGate'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 import { getProvidersStatus, getProviderConnectUrl, disconnectProvider } from '../lib/api'
 import type { ProvidersStatusResponse } from '../lib/api'
 

@@ -12,7 +12,7 @@ import {
   validateCelExpression,
 } from '../lib/api'
 import type { GuardrailProfile, GuardrailRule } from '../lib/api'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 
 // --- Profiles Sub-component ---
 

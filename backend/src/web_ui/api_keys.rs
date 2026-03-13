@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_extract_prefix() {
         let key = "sk-abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890";
-        let prefix = extract_prefix(&key);
+        let prefix = extract_prefix(key);
         assert_eq!(prefix, "sk-abcdef12");
     }
 

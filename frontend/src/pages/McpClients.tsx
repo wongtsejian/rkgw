@@ -7,7 +7,7 @@ import {
   reconnectMcpClient,
 } from '../lib/api'
 import type { McpClientState, McpTool } from '../lib/api'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/useToast'
 
 // --- Client List ---
 

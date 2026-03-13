@@ -418,7 +418,7 @@ mod tests {
         let result = parser.feed("   <thinking>Content</thinking>Done");
 
         assert!(result.thinking_content.is_some());
-        assert_eq!(parser.thinking_block_found, true);
+        assert!(parser.thinking_block_found);
     }
 
     #[test]

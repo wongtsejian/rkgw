@@ -41,6 +41,7 @@ impl KiroProvider {
         }
     }
 
+    #[allow(dead_code)]
     pub fn http_client(&self) -> &Arc<crate::http_client::KiroHttpClient> {
         &self.http_client
     }

@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_action_intervened_wins() {
-        let results = vec![
+        let results = [
             GuardrailValidationResult {
                 rule_id: uuid::Uuid::new_v4(),
                 profile_id: uuid::Uuid::new_v4(),
@@ -324,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_action_redacted_when_no_intervened() {
-        let results = vec![
+        let results = [
             GuardrailValidationResult {
                 rule_id: uuid::Uuid::new_v4(),
                 profile_id: uuid::Uuid::new_v4(),
@@ -360,7 +360,7 @@ mod tests {
 
     #[test]
     fn test_aggregate_action_none_when_all_pass() {
-        let results = vec![
+        let results = [
             GuardrailValidationResult {
                 rule_id: uuid::Uuid::new_v4(),
                 profile_id: uuid::Uuid::new_v4(),

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { getCopilotStatus, startCopilotDeviceFlow, pollCopilotDeviceCode, disconnectCopilot } from '../lib/api'
 import type { CopilotStatus, CopilotDeviceCodeResponse } from '../lib/api'
 import { DeviceCodeDisplay } from './DeviceCodeDisplay'
-import { useToast } from './Toast'
+import { useToast } from './useToast'
 
 export function CopilotSetup() {
   const { showToast } = useToast()

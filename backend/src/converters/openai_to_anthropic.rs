@@ -9,6 +9,7 @@ use crate::models::openai::ChatCompletionRequest;
 /// - `user` and `assistant` messages are passed through with their content
 /// - `max_tokens` (or `max_completion_tokens`) defaults to 4096 if unset
 /// - `temperature`, `top_p`, `stop` are passed through when present
+#[allow(dead_code)]
 pub fn openai_to_anthropic(req: &ChatCompletionRequest) -> AnthropicMessagesRequest {
     let mut system_parts: Vec<String> = Vec::new();
     let mut messages: Vec<AnthropicMessage> = Vec::new();

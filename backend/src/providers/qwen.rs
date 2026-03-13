@@ -183,10 +183,7 @@ impl QwenProvider {
         let now = Instant::now();
         let window = std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS);
 
-        let mut entry = self
-            .rate_limiter
-            .entry(key.to_string())
-            .or_insert_with(VecDeque::new);
+        let mut entry = self.rate_limiter.entry(key.to_string()).or_default();
 
         // Evict timestamps older than the window
         while entry

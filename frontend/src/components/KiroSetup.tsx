@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { apiFetch, apiPost, apiDelete, pollDeviceCode } from '../lib/api'
 import type { KiroStatus, DeviceCodeResponse } from '../lib/api'
 import { DeviceCodeDisplay } from './DeviceCodeDisplay'
-import { useToast } from './Toast'
+import { useToast } from './useToast'
 
 export function KiroSetup() {
   const { showToast } = useToast()

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, apiPut, apiDelete } from '../lib/api'
 import type { User } from '../lib/api'
-import { useToast } from './Toast'
+import { useToast } from './useToast'
 
 export function UserTable() {
   const { showToast } = useToast()

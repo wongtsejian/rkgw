@@ -60,6 +60,7 @@ impl McpManager {
     }
 
     /// Create a new McpManager without database (for testing).
+    #[allow(dead_code)]
     pub fn new_without_db() -> Self {
         let clients = Arc::new(RwLock::new(HashMap::new()));
         let client_manager = ClientManager::new(Arc::clone(&clients), 30);
@@ -229,6 +230,7 @@ impl McpManager {
     }
 
     /// Send a JSON-RPC request to a specific client's transport.
+    #[allow(dead_code)]
     pub async fn send_request(
         &self,
         client_id: Uuid,
@@ -264,6 +266,7 @@ impl McpManager {
     }
 
     /// Execute a tool by its prefixed name.
+    #[allow(dead_code)]
     pub async fn execute_tool(
         &self,
         tool_name: &str,
@@ -284,11 +287,13 @@ impl McpManager {
     }
 
     /// Get all tools in JSON-RPC format (for /mcp server).
+    #[allow(dead_code)]
     pub async fn get_all_tools_jsonrpc(&self) -> serde_json::Value {
         tool_manager::get_all_tools_jsonrpc(&self.clients).await
     }
 
     /// Route a tool call via JSON-RPC (for /mcp server).
+    #[allow(dead_code)]
     pub async fn call_tool_jsonrpc(
         &self,
         name: &str,

@@ -19,6 +19,7 @@ pub trait Provider: Send + Sync {
     /// Downcast to concrete type for accessing provider-specific state.
     fn as_any(&self) -> &dyn Any;
     /// The provider identifier.
+    #[allow(dead_code)]
     fn id(&self) -> ProviderId;
 
     /// Execute a non-streaming OpenAI-format request.

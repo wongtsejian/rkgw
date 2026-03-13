@@ -44,6 +44,7 @@ pub trait McpTransport: Send + Sync {
     ) -> Result<JsonRpcResponse, McpTransportError>;
 
     /// Check if the transport connection is alive.
+    #[allow(dead_code)]
     async fn is_connected(&self) -> bool;
 
     /// Establish the transport connection.

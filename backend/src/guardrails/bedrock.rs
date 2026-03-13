@@ -50,6 +50,7 @@ fn validate_region(region: &str) -> Result<()> {
 pub struct BedrockGuardrailResponse {
     pub action: GuardrailAction,
     pub violations: Vec<GuardrailViolation>,
+    #[allow(dead_code)]
     pub output_text: Option<String>,
 }
 
