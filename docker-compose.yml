@@ -36,6 +36,8 @@ services:
       GITHUB_COPILOT_CLIENT_SECRET: "${GITHUB_COPILOT_CLIENT_SECRET:-}"
       GITHUB_COPILOT_CALLBACK_URL: "${GITHUB_COPILOT_CALLBACK_URL:-}"
       QWEN_OAUTH_CLIENT_ID: "${QWEN_OAUTH_CLIENT_ID:-}"
+      INITIAL_ADMIN_EMAIL: ${INITIAL_ADMIN_EMAIL:-}
+      INITIAL_ADMIN_PASSWORD: ${INITIAL_ADMIN_PASSWORD:-}
     labels:
       com.datadoghq.ad.logs: '[{"source": "rust", "service": "harbangan-backend"}]'
       com.datadoghq.tags.env: "${DD_ENV:-production}"

@@ -5,6 +5,7 @@ pub mod copilot_auth;
 pub mod google_auth;
 pub mod model_registry;
 pub mod model_registry_handlers;
+pub mod password_auth;
 pub mod provider_oauth;
 pub mod provider_priority;
 pub mod qwen_auth;
@@ -83,6 +84,13 @@ pub fn web_ui_routes(state: AppState) -> Router {
         .merge(qwen_auth::qwen_auth_routes())
         // Provider priority management
         .merge(provider_priority::provider_priority_routes())
+        // Password auth: 2FA setup/verify, password change (session-authenticated)
+        .route("/auth/2fa/setup", get(password_auth::setup_2fa_handler))
+        .route("/auth/2fa/verify", post(password_auth::verify_2fa_handler))
+        .route(
+            "/auth/password/change",
+            post(password_auth::change_password_handler),
+        )
         // Session + CSRF middleware stack
         .layer(axum::middleware::from_fn(google_auth::csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(
@@ -104,6 +112,15 @@ pub fn web_ui_routes(state: AppState) -> Router {
             "/admin/models",
             model_registry_handlers::model_registry_routes(),
         )
+        // Admin password auth: create users, reset passwords
+        .route(
+            "/admin/users/create",
+            post(password_auth::admin_create_user_handler),
+        )
+        .route(
+            "/admin/users/:id/reset-password",
+            post(password_auth::admin_reset_password_handler),
+        )
         .layer(axum::middleware::from_fn(google_auth::admin_middleware))
         .layer(axum::middleware::from_fn(google_auth::csrf_middleware))
         .layer(axum::middleware::from_fn_with_state(
@@ -122,6 +139,9 @@ pub fn web_ui_routes(state: AppState) -> Router {
         )
         // Provider OAuth relay routes (authenticated by relay_token, not session)
         .merge(provider_oauth::provider_oauth_public_routes())
+        // Password auth: login + 2FA completion (no session required)
+        .route("/auth/login", post(password_auth::login_handler))
+        .route("/auth/login/2fa", post(password_auth::login_2fa_handler))
         .with_state(state.clone());
 
     Router::new()

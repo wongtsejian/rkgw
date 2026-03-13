@@ -123,6 +123,26 @@ pub enum ApiError {
     #[allow(dead_code)]
     ProviderNotConfigured(String),
 
+    /// Invalid credentials (wrong email/password)
+    #[error("Invalid credentials")]
+    #[allow(dead_code)]
+    InvalidCredentials,
+
+    /// Account temporarily locked due to too many failed login attempts
+    #[error("Account temporarily locked")]
+    #[allow(dead_code)]
+    AccountLocked { retry_after_secs: u64 },
+
+    /// Two-factor authentication required to complete login
+    #[error("Two-factor authentication required")]
+    #[allow(dead_code)]
+    TwoFactorRequired { login_token: String },
+
+    /// Two-factor setup required before account can be used
+    #[error("Two-factor setup required")]
+    #[allow(dead_code)]
+    TwoFactorSetupRequired,
+
     /// Copilot authentication failed (GitHub OAuth or token exchange)
     #[error("Copilot auth failed: {0}")]
     #[allow(dead_code)]
@@ -246,6 +266,38 @@ impl IntoResponse for ApiError {
                     "No API key configured for provider '{}'. Connect it at /_ui/profile",
                     provider
                 ),
+            ),
+            ApiError::InvalidCredentials => (
+                StatusCode::UNAUTHORIZED,
+                "invalid_credentials",
+                "Invalid credentials".to_string(),
+            ),
+            ApiError::AccountLocked { retry_after_secs } => {
+                let body = Json(json!({
+                    "error": {
+                        "message": format!("Account temporarily locked. Retry after {}s.", retry_after_secs),
+                        "type": "account_locked",
+                        "retry_after": retry_after_secs,
+                    }
+                }));
+                return (
+                    StatusCode::TOO_MANY_REQUESTS,
+                    [("retry-after", retry_after_secs.to_string())],
+                    body,
+                )
+                    .into_response();
+            }
+            ApiError::TwoFactorRequired { ref login_token } => {
+                let body = Json(json!({
+                    "needs_2fa": true,
+                    "login_token": login_token,
+                }));
+                return (StatusCode::OK, body).into_response();
+            }
+            ApiError::TwoFactorSetupRequired => (
+                StatusCode::FORBIDDEN,
+                "totp_setup_required",
+                "Two-factor setup required".to_string(),
             ),
             ApiError::CopilotAuthError(msg) => (StatusCode::BAD_GATEWAY, "copilot_auth_error", msg),
             ApiError::CopilotTokenExpired => (

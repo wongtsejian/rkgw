@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect } from 'react'
 import type { ReactNode } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useLocation } from 'react-router-dom'
 import { checkSetupStatus } from '../lib/api'
 import type { User } from '../lib/api'
 
@@ -23,6 +23,7 @@ interface SessionGateProps {
 }
 
 export function SessionGate({ children }: SessionGateProps) {
+  const location = useLocation()
   const [state, setState] = useState<{
     loading: boolean
     user: User | null
@@ -54,8 +55,20 @@ export function SessionGate({ children }: SessionGateProps) {
     return <Navigate to="/login" replace />
   }
 
+  const user = state.user
+
+  // Forced password change redirect (skip if already on that page)
+  if (user.must_change_password && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />
+  }
+
+  // Forced 2FA setup redirect for password users without TOTP (skip if already on that page)
+  if (user.auth_method === 'password' && !user.totp_enabled && location.pathname !== '/setup-2fa') {
+    return <Navigate to="/setup-2fa" replace />
+  }
+
   return (
-    <SessionContext.Provider value={{ user: state.user, setupComplete: state.setupComplete }}>
+    <SessionContext.Provider value={{ user, setupComplete: state.setupComplete }}>
       {children}
     </SessionContext.Provider>
   )

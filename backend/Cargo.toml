@@ -91,6 +91,10 @@ openidconnect = "4"
 axum-extra = { version = "0.7", features = ["cookie"] }
 subtle = "2"
 
+# Password auth + 2FA
+argon2 = "0.5"
+totp-rs = { version = "5", features = ["qr", "gen_secret"] }
+
 # Benchmark dependencies (optional)
 hdrhistogram = { version = "7", optional = true }
 

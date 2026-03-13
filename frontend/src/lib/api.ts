@@ -106,6 +106,27 @@ export interface User {
   role: 'admin' | 'user'
   last_login: string | null
   created_at: string
+  auth_method?: 'google' | 'password'
+  totp_enabled?: boolean
+  must_change_password?: boolean
+}
+
+export interface LoginResponse {
+  needs_2fa: boolean
+  login_token?: string
+}
+
+export interface TotpSetupResponse {
+  secret: string
+  qr_code_data_url: string
+  recovery_codes: string[]
+}
+
+export interface StatusResponse {
+  setup_complete: boolean
+  google_configured: boolean
+  auth_google_enabled: boolean
+  auth_password_enabled: boolean
 }
 
 export interface ApiKeyInfo {
@@ -388,6 +409,40 @@ export function reconnectMcpClient(id: string) {
 
 export function getMcpClientTools(id: string) {
   return apiFetch<McpTool[]>(`/admin/mcp/client/${id}/tools`)
+}
+
+// --- Auth (Password + 2FA) API ---
+
+export function getStatus() {
+  return apiFetch<StatusResponse>('/status')
+}
+
+export function loginWithPassword(email: string, password: string) {
+  return apiPost<LoginResponse>('/auth/login', { email, password })
+}
+
+export function verify2FA(loginToken: string, code: string) {
+  return apiPost<void>('/auth/login/2fa', { login_token: loginToken, code })
+}
+
+export function getTotpSetup() {
+  return apiFetch<TotpSetupResponse>('/auth/2fa/setup')
+}
+
+export function verifyTotpSetup(code: string) {
+  return apiPost<void>('/auth/2fa/verify', { code })
+}
+
+export function changePassword(currentPassword: string, newPassword: string) {
+  return apiPost<void>('/auth/password/change', { current_password: currentPassword, new_password: newPassword })
+}
+
+export function adminCreateUser(email: string, name: string, password: string, role: 'admin' | 'user') {
+  return apiPost<User>('/admin/users/create', { email, name, password, role })
+}
+
+export function adminResetPassword(userId: string, newPassword: string) {
+  return apiPost<void>(`/admin/users/${userId}/reset-password`, { new_password: newPassword })
 }
 
 // --- Model Registry Types ---

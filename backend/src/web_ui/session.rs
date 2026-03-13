@@ -35,6 +35,18 @@ impl SessionService {
                         tracing::error!(error = ?e, "Failed to cleanup expired sessions");
                     }
                 }
+
+                // Clean expired pending 2FA logins
+                match db.cleanup_expired_2fa().await {
+                    Ok(count) => {
+                        if count > 0 {
+                            tracing::info!(count, "Cleaned up expired pending 2FA logins");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = ?e, "Failed to cleanup expired 2FA logins");
+                    }
+                }
             }
         });
     }

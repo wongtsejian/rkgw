@@ -36,6 +36,12 @@ pub struct SessionInfo {
     pub email: String,
     pub role: String,
     pub expires_at: chrono::DateTime<Utc>,
+    /// How the user authenticated: "google" or "password"
+    pub auth_method: String,
+    /// Whether TOTP two-factor authentication is enabled for this user
+    pub totp_enabled: bool,
+    /// Whether the user must change their password on next login
+    pub must_change_password: bool,
 }
 
 /// Pending OAuth state for PKCE validation.
@@ -85,6 +91,8 @@ pub struct AppState {
     pub provider_oauth_pending: Arc<DashMap<String, ProviderOAuthPendingState>>,
     /// Token exchanger for provider OAuth (mockable for tests)
     pub token_exchanger: Arc<dyn TokenExchanger>,
+    /// Rate limiter for password login: email → (failure_count, first_failure_at)
+    pub login_rate_limiter: Arc<DashMap<String, (u32, std::time::Instant)>>,
 }
 
 impl AppState {

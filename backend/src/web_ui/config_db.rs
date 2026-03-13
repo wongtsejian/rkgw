@@ -296,6 +296,17 @@ impl ConfigDb {
             self.migrate_to_v14().await?;
         }
 
+        // Re-read max version after v14 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 15 {
+            self.migrate_to_v15().await?;
+        }
+
         Ok(())
     }
 
@@ -1072,6 +1083,340 @@ impl ConfigDb {
                 .context("Failed to get user by email")?;
 
         Ok(row)
+    }
+
+    // ── Password Auth + 2FA Methods ────────────────────────────────
+
+    /// Create a password-authenticated user (with must_change_password=true).
+    /// Uses SERIALIZABLE isolation like upsert_user for first-user-admin logic.
+    #[allow(dead_code)]
+    pub async fn create_password_user(
+        &self,
+        email: &str,
+        name: &str,
+        password_hash: &str,
+        role: &str,
+    ) -> Result<Uuid> {
+        for attempt in 0..3 {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .context("Failed to begin transaction")?;
+            sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                .execute(&mut *tx)
+                .await
+                .context("Failed to set isolation level")?;
+
+            let id = Uuid::new_v4();
+            let effective_role = if role == "admin" {
+                "admin".to_string()
+            } else {
+                // First user becomes admin
+                let count: Option<i64> = sqlx::query_scalar("SELECT COUNT(*) FROM users")
+                    .fetch_one(&mut *tx)
+                    .await
+                    .unwrap_or(Some(0));
+                if count.unwrap_or(0) == 0 {
+                    "admin".to_string()
+                } else {
+                    role.to_string()
+                }
+            };
+
+            let result = sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO users (id, email, name, role, auth_method, password_hash, must_change_password)
+                 VALUES ($1, $2, $3, $4, 'password', $5, true)
+                 RETURNING id",
+            )
+            .bind(id)
+            .bind(email)
+            .bind(name)
+            .bind(&effective_role)
+            .bind(password_hash)
+            .fetch_one(&mut *tx)
+            .await;
+
+            match result {
+                Ok(user_id) => {
+                    tx.commit()
+                        .await
+                        .context("Failed to commit create_password_user transaction")?;
+                    return Ok(user_id);
+                }
+                Err(e) => {
+                    let is_serialization_failure = e
+                        .as_database_error()
+                        .and_then(|db_err| db_err.code())
+                        .map(|code| code == "40001")
+                        .unwrap_or(false);
+
+                    if is_serialization_failure && attempt < 2 {
+                        tracing::warn!(
+                            attempt,
+                            "Serialization failure in create_password_user, retrying"
+                        );
+                        continue;
+                    }
+                    return Err(anyhow::anyhow!(e).context("Failed to create password user"));
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    /// Get a user by email with full auth fields.
+    /// Returns: (id, email, name, picture_url, role, password_hash, totp_enabled, auth_method, must_change_password)
+    #[allow(dead_code)]
+    pub async fn get_user_by_email_with_auth(
+        &self,
+        email: &str,
+    ) -> Result<
+        Option<(
+            Uuid,
+            String,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            bool,
+            String,
+            bool,
+        )>,
+    > {
+        let row = sqlx::query_as(
+            "SELECT id, email, name, picture_url, role, password_hash, totp_enabled, auth_method, must_change_password
+             FROM users WHERE email = $1",
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get user by email with auth")?;
+
+        Ok(row)
+    }
+
+    /// Get a user by ID with full auth fields (for session middleware).
+    /// Returns same tuple as get_user_by_email_with_auth.
+    #[allow(dead_code)]
+    pub async fn get_user_by_email_with_auth_by_id(
+        &self,
+        user_id: Uuid,
+    ) -> Result<
+        Option<(
+            Uuid,
+            String,
+            String,
+            Option<String>,
+            String,
+            Option<String>,
+            bool,
+            String,
+            bool,
+        )>,
+    > {
+        let row = sqlx::query_as(
+            "SELECT id, email, name, picture_url, role, password_hash, totp_enabled, auth_method, must_change_password
+             FROM users WHERE id = $1",
+        )
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get user by id with auth")?;
+
+        Ok(row)
+    }
+
+    /// Update a user's password and clear the must_change_password flag.
+    #[allow(dead_code)]
+    pub async fn update_password(&self, user_id: Uuid, password_hash: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE users SET password_hash = $1, must_change_password = false WHERE id = $2",
+        )
+        .bind(password_hash)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update password")?;
+
+        Ok(())
+    }
+
+    /// Enable TOTP for a user with the given secret.
+    #[allow(dead_code)]
+    pub async fn enable_totp(&self, user_id: Uuid, totp_secret: &str) -> Result<()> {
+        sqlx::query("UPDATE users SET totp_secret = $1, totp_enabled = true WHERE id = $2")
+            .bind(totp_secret)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to enable TOTP")?;
+
+        Ok(())
+    }
+
+    /// Disable TOTP for a user (clear secret and flag).
+    #[allow(dead_code)]
+    pub async fn disable_totp(&self, user_id: Uuid) -> Result<()> {
+        sqlx::query("UPDATE users SET totp_secret = NULL, totp_enabled = false WHERE id = $1")
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to disable TOTP")?;
+
+        Ok(())
+    }
+
+    /// Get the TOTP secret for a user.
+    #[allow(dead_code)]
+    pub async fn get_totp_secret(&self, user_id: Uuid) -> Result<Option<String>> {
+        let row: Option<(Option<String>,)> =
+            sqlx::query_as("SELECT totp_secret FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to get TOTP secret")?;
+
+        Ok(row.and_then(|r| r.0))
+    }
+
+    /// Store TOTP recovery code hashes (replaces existing ones).
+    #[allow(dead_code)]
+    pub async fn store_recovery_codes(&self, user_id: Uuid, code_hashes: &[String]) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin transaction")?;
+
+        // Delete old codes
+        sqlx::query("DELETE FROM totp_recovery_codes WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete old recovery codes")?;
+
+        // Insert new ones
+        for hash in code_hashes {
+            let id = Uuid::new_v4();
+            sqlx::query(
+                "INSERT INTO totp_recovery_codes (id, user_id, code_hash) VALUES ($1, $2, $3)",
+            )
+            .bind(id)
+            .bind(user_id)
+            .bind(hash)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to insert recovery code")?;
+        }
+
+        tx.commit()
+            .await
+            .context("Failed to commit recovery codes")?;
+
+        Ok(())
+    }
+
+    /// Use a recovery code (marks it as used). Returns true if the code was valid and unused.
+    #[allow(dead_code)]
+    pub async fn use_recovery_code(&self, user_id: Uuid, code_hash: &str) -> Result<bool> {
+        let result = sqlx::query(
+            "UPDATE totp_recovery_codes SET used = true
+             WHERE user_id = $1 AND code_hash = $2 AND used = false",
+        )
+        .bind(user_id)
+        .bind(code_hash)
+        .execute(&self.pool)
+        .await
+        .context("Failed to use recovery code")?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    /// Create a pending 2FA login with 5-minute expiry. Returns the token UUID.
+    #[allow(dead_code)]
+    pub async fn create_pending_2fa(&self, user_id: Uuid) -> Result<Uuid> {
+        let token = Uuid::new_v4();
+        let expires_at = Utc::now() + chrono::Duration::minutes(5);
+
+        sqlx::query(
+            "INSERT INTO pending_2fa_logins (token, user_id, expires_at) VALUES ($1, $2, $3)",
+        )
+        .bind(token)
+        .bind(user_id)
+        .bind(expires_at)
+        .execute(&self.pool)
+        .await
+        .context("Failed to create pending 2FA login")?;
+
+        Ok(token)
+    }
+
+    /// Get a pending 2FA login (only if not expired).
+    #[allow(dead_code)]
+    pub async fn get_pending_2fa(
+        &self,
+        token: Uuid,
+    ) -> Result<Option<(Uuid, Uuid, DateTime<Utc>)>> {
+        let row: Option<(Uuid, Uuid, DateTime<Utc>)> = sqlx::query_as(
+            "SELECT token, user_id, expires_at FROM pending_2fa_logins
+             WHERE token = $1 AND expires_at > NOW()",
+        )
+        .bind(token)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get pending 2FA login")?;
+
+        Ok(row)
+    }
+
+    /// Delete a pending 2FA login.
+    #[allow(dead_code)]
+    pub async fn delete_pending_2fa(&self, token: Uuid) -> Result<()> {
+        sqlx::query("DELETE FROM pending_2fa_logins WHERE token = $1")
+            .bind(token)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete pending 2FA login")?;
+
+        Ok(())
+    }
+
+    /// Clean up all expired pending 2FA logins. Returns the number of rows deleted.
+    #[allow(dead_code)]
+    pub async fn cleanup_expired_2fa(&self) -> Result<u64> {
+        let result = sqlx::query("DELETE FROM pending_2fa_logins WHERE expires_at <= NOW()")
+            .execute(&self.pool)
+            .await
+            .context("Failed to cleanup expired 2FA logins")?;
+
+        Ok(result.rows_affected())
+    }
+
+    /// Reset a user's 2FA (disable TOTP + delete recovery codes).
+    #[allow(dead_code)]
+    pub async fn reset_user_2fa(&self, user_id: Uuid) -> Result<()> {
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin transaction")?;
+
+        sqlx::query("UPDATE users SET totp_secret = NULL, totp_enabled = false WHERE id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to disable TOTP")?;
+
+        sqlx::query("DELETE FROM totp_recovery_codes WHERE user_id = $1")
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to delete recovery codes")?;
+
+        tx.commit().await.context("Failed to commit 2FA reset")?;
+
+        Ok(())
     }
 
     /// List all users.
@@ -2123,6 +2468,103 @@ impl ConfigDb {
             .context("Failed to commit v14 migration")?;
 
         tracing::info!("Database migration to version 14 complete");
+        Ok(())
+    }
+
+    /// Version 15 migration: password auth + 2FA tables.
+    async fn migrate_to_v15(&self) -> Result<()> {
+        tracing::info!("Running database migration to version 15 (password auth + 2FA)...");
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin v15 migration transaction")?;
+
+        // Add password/2FA columns to users table
+        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to add password_hash column")?;
+
+        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to add totp_secret column")?;
+
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add totp_enabled column")?;
+
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS auth_method TEXT NOT NULL DEFAULT 'google'",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add auth_method column")?;
+
+        sqlx::query(
+            "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to add must_change_password column")?;
+
+        // TOTP recovery codes table
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS totp_recovery_codes (
+                id UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                code_hash TEXT NOT NULL,
+                used BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create totp_recovery_codes table")?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_recovery_codes_user ON totp_recovery_codes(user_id)",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create recovery codes user index")?;
+
+        // Pending 2FA logins table
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS pending_2fa_logins (
+                token UUID PRIMARY KEY,
+                user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMPTZ NOT NULL
+            )",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create pending_2fa_logins table")?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_pending_2fa_user ON pending_2fa_logins(user_id)",
+        )
+        .execute(&mut *tx)
+        .await
+        .context("Failed to create pending 2FA user index")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(15_i32)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to record schema version 15")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit v15 migration")?;
+
+        tracing::info!("Database migration to version 15 complete");
         Ok(())
     }
 

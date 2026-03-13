@@ -34,7 +34,7 @@ export default defineConfig({
     {
       name: 'ui-public',
       testDir: './specs/ui',
-      testMatch: ['login.spec.ts', 'auth-redirect.spec.ts', 'theme-toggle.spec.ts'],
+      testMatch: ['login.spec.ts', 'auth-redirect.spec.ts', 'theme-toggle.spec.ts', 'password-login.spec.ts'],
       use: {
         baseURL: BASE_UI_URL,
         ignoreHTTPSErrors: true,
@@ -49,7 +49,7 @@ export default defineConfig({
     {
       name: 'ui-authenticated',
       testDir: './specs/ui',
-      testMatch: ['dashboard.spec.ts', 'profile.spec.ts', 'navigation.spec.ts', 'provider-oauth.spec.ts', 'copilot-setup.spec.ts', 'qwen-setup.spec.ts'],
+      testMatch: ['dashboard.spec.ts', 'profile.spec.ts', 'navigation.spec.ts', 'provider-oauth.spec.ts', 'copilot-setup.spec.ts', 'qwen-setup.spec.ts', 'totp-setup.spec.ts', 'password-change.spec.ts'],
       use: {
         baseURL: BASE_UI_URL,
         ignoreHTTPSErrors: true,
@@ -64,7 +64,7 @@ export default defineConfig({
     {
       name: 'ui-admin',
       testDir: './specs/ui',
-      testMatch: ['config.spec.ts', 'admin.spec.ts', 'guardrails.spec.ts', 'mcp.spec.ts'],
+      testMatch: ['config.spec.ts', 'admin.spec.ts', 'admin-users.spec.ts', 'guardrails.spec.ts', 'mcp.spec.ts'],
       use: {
         baseURL: BASE_UI_URL,
         ignoreHTTPSErrors: true,

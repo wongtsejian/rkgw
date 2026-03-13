@@ -143,6 +143,7 @@ mod tests {
             providers: crate::providers::build_provider_map(http_client, auth_manager, config_arc),
             provider_oauth_pending: Arc::new(DashMap::new()),
             token_exchanger: Arc::new(crate::web_ui::provider_oauth::HttpTokenExchanger::new()),
+            login_rate_limiter: Arc::new(DashMap::new()),
         }
     }
 

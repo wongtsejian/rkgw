@@ -12,6 +12,8 @@ import { UserDetail } from './pages/UserDetail'
 import { Guardrails } from './pages/Guardrails'
 import { McpClients } from './pages/McpClients'
 import { Models } from './pages/Models'
+import { TotpSetup } from './pages/TotpSetup'
+import { PasswordChange } from './pages/PasswordChange'
 
 export default function App() {
   return (
@@ -29,6 +31,8 @@ export default function App() {
             <Route path="models" element={<AdminGuard><Models /></AdminGuard>} />
             <Route path="admin" element={<AdminGuard><Admin /></AdminGuard>} />
             <Route path="admin/users/:userId" element={<AdminGuard><UserDetail /></AdminGuard>} />
+            <Route path="setup-2fa" element={<TotpSetup />} />
+            <Route path="change-password" element={<PasswordChange />} />
           </Route>
         </Routes>
       </BrowserRouter>

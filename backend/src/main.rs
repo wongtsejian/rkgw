@@ -97,13 +97,49 @@ async fn main() -> Result<()> {
     };
 
     // ── Setup state ─────────────────────────────────────────────────
-    let setup_complete_flag = if is_proxy_only {
+    let mut setup_complete_flag = if is_proxy_only {
         true // proxy-only is always "setup complete"
     } else if let Some(ref db) = config_db {
         db.is_setup_complete().await
     } else {
         false
     };
+
+    // Seed initial admin user from env vars (only on first run, before any users exist)
+    if !is_proxy_only && !setup_complete_flag {
+        if let Some(ref db) = config_db {
+            let initial_email = std::env::var("INITIAL_ADMIN_EMAIL").ok();
+            let initial_password = std::env::var("INITIAL_ADMIN_PASSWORD").ok();
+            if let (Some(email), Some(password)) = (initial_email, initial_password) {
+                match web_ui::password_auth::hash_password(&password) {
+                    Ok(password_hash) => {
+                        match db
+                            .create_password_user(&email, &email, &password_hash, "admin")
+                            .await
+                        {
+                            Ok(user_id) => {
+                                tracing::info!(
+                                    user_id = %user_id,
+                                    email = %email,
+                                    "Initial admin user created from env vars"
+                                );
+                                setup_complete_flag = true;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "Failed to create initial admin user"
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to hash initial admin password");
+                    }
+                }
+            }
+        }
+    }
 
     let setup_complete = Arc::new(AtomicBool::new(setup_complete_flag));
 
@@ -279,6 +315,7 @@ async fn main() -> Result<()> {
         ),
         provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
         token_exchanger: Arc::new(web_ui::provider_oauth::HttpTokenExchanger::new()),
+        login_rate_limiter: Arc::new(dashmap::DashMap::new()),
     };
 
     // ── Guardrails (skip in proxy-only mode) ────────────────────────

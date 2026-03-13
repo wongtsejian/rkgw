@@ -84,7 +84,7 @@ fn is_local_dev(callback_url: &str) -> bool {
 }
 
 /// Build a session cookie header value.
-fn session_cookie(session_id: Uuid, callback_url: &str) -> String {
+pub(crate) fn session_cookie(session_id: Uuid, callback_url: &str) -> String {
     let secure = if is_local_dev(callback_url) {
         ""
     } else {
@@ -97,7 +97,7 @@ fn session_cookie(session_id: Uuid, callback_url: &str) -> String {
 }
 
 /// Build a CSRF cookie header value (non-HttpOnly so JS can read it).
-fn csrf_cookie(token: &str, callback_url: &str) -> String {
+pub(crate) fn csrf_cookie(token: &str, callback_url: &str) -> String {
     let secure = if is_local_dev(callback_url) {
         ""
     } else {
@@ -110,7 +110,7 @@ fn csrf_cookie(token: &str, callback_url: &str) -> String {
 }
 
 /// Build a clear-cookie header to delete the session.
-fn clear_session_cookie(callback_url: &str) -> String {
+pub(crate) fn clear_session_cookie(callback_url: &str) -> String {
     let secure = if is_local_dev(callback_url) {
         ""
     } else {
@@ -122,7 +122,7 @@ fn clear_session_cookie(callback_url: &str) -> String {
     )
 }
 
-fn clear_csrf_cookie(callback_url: &str) -> String {
+pub(crate) fn clear_csrf_cookie(callback_url: &str) -> String {
     let secure = if is_local_dev(callback_url) {
         ""
     } else {
@@ -135,7 +135,7 @@ fn clear_csrf_cookie(callback_url: &str) -> String {
 }
 
 /// Extract session_id from the kgw_session cookie.
-fn extract_session_id(headers: &axum::http::HeaderMap) -> Option<Uuid> {
+pub(crate) fn extract_session_id(headers: &axum::http::HeaderMap) -> Option<Uuid> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -147,7 +147,7 @@ fn extract_session_id(headers: &axum::http::HeaderMap) -> Option<Uuid> {
 }
 
 /// Extract CSRF token from the csrf_token cookie.
-fn extract_csrf_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
+pub(crate) fn extract_csrf_cookie(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
     for part in cookie_header.split(';') {
         let part = part.trim();
@@ -381,6 +381,9 @@ pub async fn google_auth_callback(
             email: email.clone(),
             role: role.clone(),
             expires_at,
+            auth_method: "google".to_string(),
+            totp_enabled: false,
+            must_change_password: false,
         },
     );
 
@@ -453,6 +456,9 @@ pub async fn auth_me(
         "email": session.email,
         "role": session.role,
         "has_kiro_token": has_kiro_token,
+        "auth_method": session.auth_method,
+        "totp_enabled": session.totp_enabled,
+        "must_change_password": session.must_change_password,
     })))
 }
 
@@ -471,9 +477,30 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
             && !config.google_callback_url.is_empty()
     };
 
+    let auth_google_enabled = if let Some(ref db) = state.config_db {
+        db.get("auth_google_enabled")
+            .await
+            .unwrap_or(None)
+            .map(|v| v == "true")
+            .unwrap_or(true)
+    } else {
+        true
+    };
+    let auth_password_enabled = if let Some(ref db) = state.config_db {
+        db.get("auth_password_enabled")
+            .await
+            .unwrap_or(None)
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    } else {
+        false
+    };
+
     Json(json!({
         "setup_complete": has_users,
         "google_configured": google_configured,
+        "auth_google_enabled": auth_google_enabled,
+        "auth_password_enabled": auth_password_enabled,
     }))
 }
 
@@ -516,18 +543,21 @@ pub async fn session_middleware(
         return Err(ApiError::SessionExpired);
     }
 
-    // Resolve user
-    let user_row = config_db
-        .get_user(user_id)
+    // Resolve user with auth fields
+    let user_auth = config_db
+        .get_user_by_email_with_auth_by_id(user_id)
         .await
         .map_err(ApiError::Internal)?
         .ok_or(ApiError::SessionExpired)?;
 
     let session_info = SessionInfo {
-        user_id: user_row.0,
-        email: user_row.1.clone(),
-        role: user_row.4.clone(),
+        user_id: user_auth.0,
+        email: user_auth.1.clone(),
+        role: user_auth.4.clone(),
         expires_at,
+        auth_method: user_auth.7.clone(),
+        totp_enabled: user_auth.6,
+        must_change_password: user_auth.8,
     };
 
     // Cache it
@@ -658,6 +688,7 @@ mod tests {
             providers: crate::providers::build_provider_map(http_client, auth_manager, config_arc),
             provider_oauth_pending: Arc::new(dashmap::DashMap::new()),
             token_exchanger: Arc::new(crate::web_ui::provider_oauth::HttpTokenExchanger::new()),
+            login_rate_limiter: Arc::new(dashmap::DashMap::new()),
         }
     }
 
@@ -756,6 +787,9 @@ mod tests {
                 email: "test@example.com".to_string(),
                 role: "admin".to_string(),
                 expires_at,
+                auth_method: "google".to_string(),
+                totp_enabled: false,
+                must_change_password: false,
             },
         );
 
@@ -791,6 +825,9 @@ mod tests {
                 email: "test@example.com".to_string(),
                 role: "user".to_string(),
                 expires_at,
+                auth_method: "google".to_string(),
+                totp_enabled: false,
+                must_change_password: false,
             },
         );
 
@@ -945,6 +982,9 @@ mod tests {
                 email: "admin@example.com".to_string(),
                 role: "admin".to_string(),
                 expires_at: Utc::now() + chrono::Duration::hours(12),
+                auth_method: "google".to_string(),
+                totp_enabled: false,
+                must_change_password: false,
             });
             next.run(request).await
         }
@@ -968,6 +1008,9 @@ mod tests {
                 email: "user@example.com".to_string(),
                 role: "user".to_string(),
                 expires_at: Utc::now() + chrono::Duration::hours(12),
+                auth_method: "google".to_string(),
+                totp_enabled: false,
+                must_change_password: false,
             });
             next.run(request).await
         }
@@ -1028,6 +1071,9 @@ mod tests {
             email: "alice@example.com".to_string(),
             role: "admin".to_string(),
             expires_at: Utc::now() + chrono::Duration::hours(12),
+            auth_method: "google".to_string(),
+            totp_enabled: false,
+            must_change_password: false,
         });
 
         let result = auth_me(State(state), request).await;

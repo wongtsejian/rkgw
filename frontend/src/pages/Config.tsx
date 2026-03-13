@@ -90,6 +90,14 @@ const CONFIG_GROUPS: { title: string; icon: string; fields: ConfigField[] }[] = 
       { key: 'mcp_max_consecutive_failures', label: 'Max Failures', type: 'number' },
     ],
   },
+  {
+    title: 'Authentication',
+    icon: 'lock',
+    fields: [
+      { key: 'auth_google_enabled', label: 'Google SSO', type: 'checkbox' },
+      { key: 'auth_password_enabled', label: 'Password Auth', type: 'checkbox' },
+    ],
+  },
 ]
 
 const RESTART_KEYS = new Set(

@@ -68,6 +68,8 @@ Set in `.env` (see `.env.example`):
 | `GOOGLE_CLIENT_ID` | Yes | Google OAuth Client ID |
 | `GOOGLE_CLIENT_SECRET` | Yes | Google OAuth Client Secret |
 | `GOOGLE_CALLBACK_URL` | Yes | OAuth callback (e.g. `https://$DOMAIN/_ui/api/auth/google/callback`) |
+| `INITIAL_ADMIN_EMAIL` | No | Seed admin email for password auth (first-run only) |
+| `INITIAL_ADMIN_PASSWORD` | No | Seed admin password for password auth (first-run only) |
 
 Auto-set by docker-compose: `DATABASE_URL`, `SERVER_HOST` (0.0.0.0), `SERVER_PORT` (8000).
 
@@ -111,7 +113,11 @@ Two separate auth systems:
 
 1. **API key auth** (for `/v1/*` proxy endpoints): Clients send `Authorization: Bearer <api-key>` or `x-api-key` header. Middleware SHA-256 hashes the key, looks up user in cache/DB, injects per-user Kiro credentials into the request.
 
-2. **Google SSO** (for `/_ui/api/*` web UI): PKCE + OpenID Connect flow. Session cookie `kgw_session` (24h TTL), CSRF token in separate cookie. Admin vs User roles.
+2. **Web UI auth** (for `/_ui/api/*`): Two methods supported, configured via admin UI:
+   - **Google SSO** (default): PKCE + OpenID Connect flow
+   - **Username/Password + mandatory 2FA**: Argon2 password hashing, TOTP-based 2FA (mandatory for all password users), recovery codes
+   - Session cookie `kgw_session` (24h TTL), CSRF token, Admin vs User roles
+   - First user auto-promoted to admin (regardless of auth method)
 
 ### Setup-Only Mode
 
@@ -135,6 +141,7 @@ Defined in `backend/src/routes/mod.rs`:
 - `oauth_pending: Arc<DashMap<String, OAuthPendingState>>` — PKCE state (10-min TTL, 10k cap)
 - `guardrails_engine: Option<Arc<GuardrailsEngine>>` — Content validation engine (CEL rules + Bedrock API)
 - `mcp_manager: Option<Arc<McpManager>>` — MCP Gateway orchestrator (client connections, tool discovery, execution)
+- `login_rate_limiter: Arc<LoginRateLimiter>` — per-IP login attempt rate limiting
 
 ### Key Modules (backend/src/)
 
@@ -142,7 +149,7 @@ Defined in `backend/src/routes/mod.rs`:
 - `auth/` — Kiro authentication via refresh tokens in PostgreSQL, auto-refreshes before expiry.
 - `streaming/mod.rs` — Parses Kiro's AWS Event Stream binary format into `KiroEvent` variants.
 - `models/` — Request/response types for OpenAI, Anthropic, and Kiro formats.
-- `web_ui/` — Web UI API handlers. Google SSO (`google_auth.rs`), session management (`session.rs`), per-user API keys (`api_keys.rs`), per-user Kiro tokens (`user_kiro.rs`), config persistence (`config_db.rs`).
+- `web_ui/` — Web UI API handlers. Google SSO (`google_auth.rs`), password auth + TOTP 2FA (`password_auth.rs`), session management (`session.rs`), per-user API keys (`api_keys.rs`), per-user Kiro tokens (`user_kiro.rs`), config persistence (`config_db.rs`).
 - `middleware/` — CORS, API key auth (SHA-256 + cache/DB lookup), debug logging.
 - `guardrails/` — Content safety via AWS Bedrock guardrails (CEL rule engine + Bedrock API). Input/output validation with configurable rules stored in PostgreSQL.
 - `mcp/` — MCP Gateway. Manages external tool servers over HTTP/SSE/STDIO transports. Includes client lifecycle (`client_manager.rs`), health monitoring, tool discovery/sync, and DB persistence.
@@ -170,10 +177,10 @@ Defined in `backend/src/routes/mod.rs`:
 - `GET /` — Status JSON
 
 **Web UI API (`/_ui/api/*`, auth via session cookie):**
-- Public: `/status`, `/auth/google`, `/auth/google/callback`
-- Session: `/metrics`, `/system`, `/models`, `/logs`, `/config`, `/config/schema`, `/config/history`, `/auth/me`, `/stream/metrics` (SSE), `/stream/logs` (SSE)
+- Public: `/status`, `/auth/google`, `/auth/google/callback`, `POST /auth/login`, `POST /auth/login/2fa`
+- Session: `/metrics`, `/system`, `/models`, `/logs`, `/config`, `/config/schema`, `/config/history`, `/auth/me`, `/auth/2fa/setup` (GET), `/auth/2fa/verify` (POST), `/auth/password/change` (POST), `/stream/metrics` (SSE), `/stream/logs` (SSE)
 - Mutations (+ CSRF): `/auth/logout`, Kiro token routes, API key routes
-- Admin-only (+ CSRF): `PUT /config`, domain allowlist routes, user management routes
+- Admin-only (+ CSRF): `PUT /config`, domain allowlist routes, user management routes, `POST /admin/users/create`, `POST /admin/users/:id/reset-password`
 - Admin-only: MCP client CRUD routes (`/_ui/api/admin/mcp/clients/*`)
 - Admin-only: Guardrails profile/rule CRUD routes (`/_ui/api/guardrails/*`), CEL validation, profile testing
 

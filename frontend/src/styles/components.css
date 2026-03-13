@@ -1703,3 +1703,172 @@ select.config-input {
   color: var(--yellow);
 }
 
+/* ---- Auth Divider ---- */
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 18px 0;
+}
+
+.auth-divider-line {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-divider-text {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-tertiary);
+  text-transform: lowercase;
+}
+
+/* ---- Auth Toggle Link ---- */
+
+.auth-toggle-link {
+  display: block;
+  margin-top: 14px;
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  cursor: pointer;
+  transition: color 0.15s;
+  padding: 4px;
+}
+
+.auth-toggle-link:hover {
+  color: var(--green);
+}
+
+/* ---- Auth Submit Secondary ---- */
+
+.auth-submit-secondary {
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
+  box-shadow: none !important;
+  margin-top: 8px;
+}
+
+.auth-submit-secondary:hover {
+  border-color: var(--text-tertiary) !important;
+  background: var(--surface-hover) !important;
+}
+
+/* ---- TOTP QR Code ---- */
+
+.totp-qr {
+  display: flex;
+  justify-content: center;
+  margin: 16px 0;
+  padding: 16px;
+  background: #ffffff;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+
+.totp-qr img {
+  display: block;
+  image-rendering: pixelated;
+}
+
+/* ---- TOTP Secret ---- */
+
+.totp-secret {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--green);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  margin-bottom: 16px;
+  word-break: break-all;
+  text-align: center;
+  letter-spacing: 0.05em;
+  user-select: all;
+}
+
+/* ---- TOTP Input ---- */
+
+.totp-input {
+  text-align: center;
+  font-size: 1.2rem !important;
+  letter-spacing: 0.3em;
+  font-weight: 600;
+}
+
+/* ---- Recovery Codes ---- */
+
+.recovery-codes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.recovery-codes-item {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--green);
+  padding: 4px 8px;
+  text-align: center;
+  letter-spacing: 0.04em;
+}
+
+.recovery-codes-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.recovery-codes-actions .auth-submit {
+  flex: 1;
+}
+
+/* ---- Auth Method Badge ---- */
+
+.auth-method-badge {
+  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  text-transform: lowercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+/* ---- Create User Form ---- */
+
+.create-user-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.create-user-row {
+  display: flex;
+  gap: 10px;
+}
+
+.create-user-row .config-input {
+  flex: 1;
+  max-width: none;
+}
+
+@media (max-width: 600px) {
+  .create-user-row {
+    flex-direction: column;
+  }
+}
+
