@@ -227,10 +227,91 @@ pub async fn google_auth_redirect(State(state): State<AppState>) -> Result<Respo
             nonce: nonce.secret().clone(),
             pkce_verifier: pkce_verifier.secret().clone(),
             created_at: Utc::now(),
+            linking_user_id: None,
         },
     );
 
     // Redirect
+    Ok(Response::builder()
+        .status(302)
+        .header("Location", auth_url.to_string())
+        .body(Body::empty())
+        .unwrap())
+}
+
+/// GET /_ui/api/auth/google/link — start Google account linking (session-required).
+/// Unlike google_auth_redirect, this stores the user_id in pending state so the
+/// callback can distinguish linking from login.
+pub async fn google_link_redirect(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> Result<Response, ApiError> {
+    let session = request
+        .extensions()
+        .get::<SessionInfo>()
+        .cloned()
+        .ok_or(ApiError::SessionExpired)?;
+
+    let (client_id, client_secret, callback_url) = {
+        let config = state.config.read().unwrap_or_else(|p| p.into_inner());
+        (
+            config.google_client_id.clone(),
+            config.google_client_secret.clone(),
+            config.google_callback_url.clone(),
+        )
+    };
+
+    if client_id.is_empty() || client_secret.is_empty() || callback_url.is_empty() {
+        return Err(ApiError::ConfigError(
+            "Google OAuth not configured".to_string(),
+        ));
+    }
+
+    let provider_metadata = get_oidc_provider().await?;
+    let oidc_client = CoreClient::from_provider_metadata(
+        provider_metadata.clone(),
+        ClientId::new(client_id),
+        Some(ClientSecret::new(client_secret)),
+    )
+    .set_redirect_uri(
+        RedirectUrl::new(callback_url)
+            .map_err(|e| ApiError::Internal(anyhow::anyhow!("Invalid redirect URL: {}", e)))?,
+    );
+
+    let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+    let (auth_url, csrf_token, nonce) = oidc_client
+        .authorize_url(
+            CoreAuthenticationFlow::AuthorizationCode,
+            CsrfToken::new_random,
+            Nonce::new_random,
+        )
+        .add_scope(Scope::new("email".to_string()))
+        .add_scope(Scope::new("profile".to_string()))
+        .set_pkce_challenge(pkce_challenge)
+        .url();
+
+    // Cleanup expired entries
+    let now = Utc::now();
+    state
+        .oauth_pending
+        .retain(|_, v| (now - v.created_at).num_minutes() < 10);
+
+    if state.oauth_pending.len() >= 10_000 {
+        return Err(ApiError::Internal(anyhow::anyhow!(
+            "Too many pending OAuth requests. Please try again later."
+        )));
+    }
+
+    state.oauth_pending.insert(
+        csrf_token.secret().clone(),
+        OAuthPendingState {
+            nonce: nonce.secret().clone(),
+            pkce_verifier: pkce_verifier.secret().clone(),
+            created_at: Utc::now(),
+            linking_user_id: Some(session.user_id),
+        },
+    );
+
     Ok(Response::builder()
         .status(302)
         .header("Location", auth_url.to_string())
@@ -358,11 +439,67 @@ pub async fn google_auth_callback(
         return redirect_login_error("domain_not_allowed");
     }
 
+    // ── Branch: Google account linking vs. login ──
+    if let Some(linking_uid) = pending.linking_user_id {
+        // Linking flow: verify the Google email matches the user's email
+        let user = config_db
+            .get_user_by_email(&email)
+            .await
+            .map_err(ApiError::Internal)?;
+
+        match user {
+            Some((uid, ..)) if uid == linking_uid => {
+                // Email matches — link the Google account
+                config_db
+                    .set_google_linked(linking_uid, true)
+                    .await
+                    .map_err(ApiError::Internal)?;
+
+                tracing::info!(user_id = %linking_uid, email = %email, "Google account linked");
+
+                return Ok(Response::builder()
+                    .status(302)
+                    .header("Location", "/_ui/profile")
+                    .body(Body::empty())
+                    .unwrap());
+            }
+            _ => {
+                // Email mismatch — redirect with error
+                return Ok(Response::builder()
+                    .status(302)
+                    .header("Location", "/_ui/profile?error=google_email_mismatch")
+                    .body(Body::empty())
+                    .unwrap());
+            }
+        }
+    }
+
+    // ── Normal login flow ──
+
     // Upsert user (first-user-admin logic is in DB query)
     let (user_id, role) = config_db
         .upsert_user(&email, &name, picture.as_deref())
         .await
         .map_err(ApiError::Internal)?;
+
+    // Check if this is a password-method user trying to log in via Google
+    // They must have explicitly linked their Google account first
+    let user_auth = config_db
+        .get_user_by_email_with_auth(&email)
+        .await
+        .map_err(ApiError::Internal)?;
+
+    if let Some((_, _, _, _, _, _, _, ref auth_method, _)) = user_auth {
+        if auth_method == "password" {
+            let google_linked = config_db
+                .get_google_linked(user_id)
+                .await
+                .map_err(ApiError::Internal)?;
+            if !google_linked {
+                return redirect_login_error("google_not_linked");
+            }
+        }
+    }
 
     tracing::info!(user_id = %user_id, email = %email, role = %role, "User authenticated via Google SSO");
 
@@ -451,6 +588,13 @@ pub async fn auth_me(
         false
     };
 
+    // Check if user has linked their Google account
+    let google_linked = if let Some(ref db) = state.config_db {
+        db.get_google_linked(session.user_id).await.unwrap_or(false)
+    } else {
+        false
+    };
+
     Ok(Json(json!({
         "user_id": session.user_id,
         "email": session.email,
@@ -459,6 +603,7 @@ pub async fn auth_me(
         "auth_method": session.auth_method,
         "totp_enabled": session.totp_enabled,
         "must_change_password": session.must_change_password,
+        "google_linked": google_linked,
     })))
 }
 
@@ -491,9 +636,9 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
             .await
             .unwrap_or(None)
             .map(|v| v == "true")
-            .unwrap_or(false)
+            .unwrap_or(true)
     } else {
-        false
+        true
     };
 
     Json(json!({

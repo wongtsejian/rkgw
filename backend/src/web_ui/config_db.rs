@@ -318,6 +318,17 @@ impl ConfigDb {
             self.migrate_to_v16().await?;
         }
 
+        // Re-read max version after v16 migration
+        let max_version: Option<i32> =
+            sqlx::query_scalar("SELECT MAX(version) FROM schema_version")
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(Some(1));
+
+        if max_version.unwrap_or(1) < 17 {
+            self.migrate_to_v17().await?;
+        }
+
         Ok(())
     }
 
@@ -1319,6 +1330,50 @@ impl ConfigDb {
         .context("Failed to use recovery code")?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Set the google_linked flag for a user.
+    #[allow(dead_code)]
+    pub async fn set_google_linked(&self, user_id: Uuid, linked: bool) -> Result<()> {
+        sqlx::query("UPDATE users SET google_linked = $1 WHERE id = $2")
+            .bind(linked)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to set google_linked")?;
+
+        Ok(())
+    }
+
+    /// Get the google_linked flag for a user.
+    #[allow(dead_code)]
+    pub async fn get_google_linked(&self, user_id: Uuid) -> Result<bool> {
+        let row: Option<(bool,)> = sqlx::query_as("SELECT google_linked FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to get google_linked")?;
+
+        Ok(row.map(|r| r.0).unwrap_or(false))
+    }
+
+    /// Update a user's password, set auth_method to 'password', and clear must_change_password.
+    #[allow(dead_code)]
+    pub async fn update_password_with_auth_method(
+        &self,
+        user_id: Uuid,
+        password_hash: &str,
+    ) -> Result<()> {
+        sqlx::query(
+            "UPDATE users SET password_hash = $1, auth_method = 'password', must_change_password = false WHERE id = $2",
+        )
+        .bind(password_hash)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await
+        .context("Failed to update password with auth_method")?;
+
+        Ok(())
     }
 
     /// Create a pending 2FA login with 5-minute expiry. Returns the token UUID.
@@ -2587,6 +2642,35 @@ impl ConfigDb {
             .context("Failed to commit v16 migration")?;
 
         tracing::info!("Database migration to version 16 complete");
+        Ok(())
+    }
+
+    /// Version 17 migration: add google_linked column to users table.
+    async fn migrate_to_v17(&self) -> Result<()> {
+        tracing::info!("Running database migration to version 17 (google_linked column)...");
+
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .context("Failed to begin v17 migration transaction")?;
+
+        sqlx::query("ALTER TABLE users ADD COLUMN IF NOT EXISTS google_linked BOOLEAN NOT NULL DEFAULT FALSE")
+            .execute(&mut *tx)
+            .await
+            .context("Failed to add google_linked column")?;
+
+        sqlx::query("INSERT INTO schema_version (version) VALUES ($1)")
+            .bind(17_i32)
+            .execute(&mut *tx)
+            .await
+            .context("Failed to record schema version 17")?;
+
+        tx.commit()
+            .await
+            .context("Failed to commit v17 migration")?;
+
+        tracing::info!("Database migration to version 17 complete");
         Ok(())
     }
 

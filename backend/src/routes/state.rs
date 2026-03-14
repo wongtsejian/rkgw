@@ -50,6 +50,9 @@ pub struct OAuthPendingState {
     pub nonce: String,
     pub pkce_verifier: String,
     pub created_at: chrono::DateTime<Utc>,
+    /// When set, this OAuth flow is for linking a Google account to an existing user,
+    /// not for login. The callback will update google_linked instead of creating a session.
+    pub linking_user_id: Option<Uuid>,
 }
 
 /// Application state shared across handlers.

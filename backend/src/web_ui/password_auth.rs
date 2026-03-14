@@ -246,13 +246,11 @@ pub async fn login_handler(
         must_change_password,
     ) = user;
 
-    // Must be a password user
-    if auth_method != "password" {
-        return Err(ApiError::InvalidCredentials);
-    }
-
-    // Must have a password hash
+    // Must have a password hash (allows Google-first users who set a password to log in)
     let stored_hash = password_hash.ok_or(ApiError::InvalidCredentials)?;
+
+    // Suppress unused variable warning for auth_method (kept for future use)
+    let _ = auth_method;
 
     // Verify password
     let valid = verify_password(&payload.password, &stored_hash).map_err(ApiError::Internal)?;
@@ -568,8 +566,8 @@ pub async fn change_password_handler(
     // Hash new password
     let new_hash = hash_password(&payload.new_password).map_err(ApiError::Internal)?;
 
-    // Update in DB
-    db.update_password(session.user_id, &new_hash)
+    // Update in DB (also sets auth_method='password' for SSO users setting first password)
+    db.update_password_with_auth_method(session.user_id, &new_hash)
         .await
         .map_err(ApiError::Internal)?;
 

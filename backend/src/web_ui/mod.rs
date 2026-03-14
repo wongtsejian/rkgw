@@ -88,6 +88,8 @@ pub fn web_ui_routes(state: AppState) -> Router {
             "/models/registry",
             model_registry_handlers::model_registry_routes(),
         )
+        // Google account linking (session-authenticated)
+        .route("/auth/google/link", get(google_auth::google_link_redirect))
         // Password auth: 2FA setup/verify, password change (session-authenticated)
         .route("/auth/2fa/setup", get(password_auth::setup_2fa_handler))
         .route("/auth/2fa/verify", post(password_auth::verify_2fa_handler))

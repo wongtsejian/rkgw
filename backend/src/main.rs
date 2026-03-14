@@ -122,6 +122,74 @@ async fn main() -> Result<()> {
                                     email = %email,
                                     "Initial admin user created from env vars"
                                 );
+
+                                // Pre-configure TOTP if secret is provided
+                                if let Ok(totp_secret) = std::env::var("INITIAL_ADMIN_TOTP_SECRET")
+                                {
+                                    if !totp_secret.is_empty() {
+                                        match db.enable_totp(user_id, &totp_secret).await {
+                                            Ok(()) => {
+                                                // Generate and store recovery codes
+                                                use rand::Rng;
+                                                use sha2::{Digest, Sha256};
+
+                                                let mut rng = rand::thread_rng();
+                                                let recovery_codes: Vec<String> = (0..8)
+                                                    .map(|_| {
+                                                        (0..8)
+                                                            .map(|_| {
+                                                                let idx = rng.gen_range(0..36u8);
+                                                                if idx < 10 {
+                                                                    (b'0' + idx) as char
+                                                                } else {
+                                                                    (b'a' + idx - 10) as char
+                                                                }
+                                                            })
+                                                            .collect()
+                                                    })
+                                                    .collect();
+
+                                                let code_hashes: Vec<String> = recovery_codes
+                                                    .iter()
+                                                    .map(|c| {
+                                                        let mut hasher = Sha256::new();
+                                                        hasher.update(c.as_bytes());
+                                                        hex::encode(hasher.finalize())
+                                                    })
+                                                    .collect();
+
+                                                match db
+                                                    .store_recovery_codes(user_id, &code_hashes)
+                                                    .await
+                                                {
+                                                    Ok(()) => {
+                                                        tracing::info!(
+                                                            user_id = %user_id,
+                                                            "TOTP pre-configured for initial admin"
+                                                        );
+                                                        tracing::info!(
+                                                            "Recovery codes (save these): {:?}",
+                                                            recovery_codes
+                                                        );
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::warn!(
+                                                            error = %e,
+                                                            "Failed to store recovery codes for initial admin"
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::warn!(
+                                                    error = %e,
+                                                    "Failed to enable TOTP for initial admin"
+                                                );
+                                            }
+                                        }
+                                    }
+                                }
+
                                 setup_complete_flag = true;
                             }
                             Err(e) => {
