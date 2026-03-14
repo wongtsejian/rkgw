@@ -10,7 +10,7 @@ This directory is the AI workflow infrastructure for Harbangan. It provides a fu
 ├── README.md                    # This file (full documentation)
 ├── settings.json                # Claude Code configuration
 ├── agents/                      # 8 agent definitions
-├── skills/                      # 5 invocable skills
+├── skills/                      # 10 invocable skills
 ├── agent-memory/                # Persistent per-agent memory
 ├── rules/                       # Coding standards + plan mode rules
 └── plans/                       # Implementation plans
@@ -47,7 +47,7 @@ Each agent is a `.md` file with YAML frontmatter defining its name, description,
 
 ---
 
-## Skills (5 total)
+## Skills (10 total)
 
 Skills are invocable via `/skill-name [arguments]`.
 
@@ -83,11 +83,25 @@ Skills are invocable via `/skill-name [arguments]`.
 | `refactor` | coordinator + 2 service + 1 reviewer | Code refactoring |
 | `hotfix` | 1 service + 1 QA agent | Urgent bug fix |
 
-### Other Skills (1)
+### GitHub Operations (4) — Board & PR Lifecycle
+
+| Skill | Purpose | Execution | Key Arguments |
+|-------|---------|-----------|---------------|
+| `/merge-pr` | Squash-merge PR, cleanup branches, return to main | Inline | `[pr-number]` |
+| `/create-issue` | Create GH issue on Harbangan Board | Forks to kanban-master | `"title" [--service X] [--priority X] [--size X]` |
+| `/board-status` | Show project board status grouped by column | Inline (read-only) | `[--status column] [--service name]` |
+| `/close-issues` | Close issues and update board to Done | Inline | `<numbers> [--pr N]` |
+
+`/merge-pr` and `/close-issues` have `disable-model-invocation: true` (destructive — user-only).
+`/board-status` is safe for Claude auto-invocation (read-only).
+`/create-issue` delegates to `kanban-master` agent for board field setup.
+
+### Utility Skills (2)
 
 | Skill | Purpose |
 |-------|---------|
-| `humanizer` | Remove signs of AI-generated writing from text |
+| `/humanizer` | Remove signs of AI-generated writing from text |
+| `/rename-plan` | Rename plan files to datetime-prefixed descriptive names |
 
 Note: Team coordination guidance (file ownership, communication protocols, team sizing) is now in `.claude/rules/team-coordination.md` and auto-loaded into all agent sessions.
 
