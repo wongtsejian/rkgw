@@ -145,5 +145,5 @@ gh issue close #N              →  sync completion to GitHub
 
 - **Plugins**: playwright (browser automation), Notion (workspace), slack (messaging), commit-commands, rust-analyzer-lsp, context7, frontend-design, agent-teams
 - **Environment**: `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` for multi-agent support
-- **Teammate mode**: `iterm2` (agents spawn as iTerm2 tabs with distinct colors)
+- **Teammate mode**: `in-process` (agents run within the main terminal, cycle with Shift+Down)
 - **MCP servers**: deepwiki enabled
