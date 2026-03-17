@@ -51,6 +51,37 @@ pub async fn auth_middleware(
         ApiError::AuthError("Invalid or missing API Key".to_string())
     })?;
 
+    // Proxy-only mode: hash-based constant-time compare, no lock needed
+    if let Some(expected_hash) = state.proxy_api_key_hash {
+        use sha2::{Digest as _, Sha256};
+        use subtle::ConstantTimeEq;
+
+        let incoming_hash: [u8; 32] = Sha256::digest(raw_key.as_bytes()).into();
+        if !bool::from(incoming_hash.ct_eq(&expected_hash)) {
+            return Err(ApiError::AuthError("Invalid API key".to_string()));
+        }
+
+        // Get access token from global auth manager — extract and drop guard
+        let (access_token, region) = {
+            let auth = state.auth_manager.read().await;
+            let token = auth.get_access_token().await.map_err(|e| {
+                tracing::error!(error = %e, "Proxy auth token refresh failed");
+                ApiError::AuthError("Proxy authentication unavailable".to_string())
+            })?;
+            let region = auth.get_region().await;
+            (token, region)
+        }; // guard dropped
+
+        let creds = UserKiroCreds {
+            user_id: crate::routes::PROXY_USER_ID,
+            access_token,
+            refresh_token: String::new(),
+            region,
+        };
+        request.extensions_mut().insert(creds);
+        return Ok(next.run(request).await);
+    }
+
     // SHA-256 hash lookup in cache/DB
     let key_hash = hex::encode(Sha256::digest(raw_key.as_bytes()));
 
@@ -274,6 +305,7 @@ mod tests {
         let config_arc = Arc::new(std::sync::RwLock::new(config));
 
         AppState {
+            proxy_api_key_hash: None,
             model_cache: cache,
             auth_manager: Arc::clone(&auth_manager),
             http_client: Arc::clone(&http_client),

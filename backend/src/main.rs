@@ -28,6 +28,7 @@ async fn main() -> Result<()> {
     // Load bootstrap configuration from environment variables
     let mut config = config::Config::load()?;
     config.validate()?;
+    let is_proxy_only = config.is_proxy_only();
 
     // Set up logging
     let log_level = config.log_level.to_lowercase();
@@ -68,10 +69,16 @@ async fn main() -> Result<()> {
             .init();
     }
 
-    tracing::info!("Kiro Gateway starting...");
+    if is_proxy_only {
+        tracing::info!("Kiro Gateway starting in proxy-only mode...");
+    } else {
+        tracing::info!("Kiro Gateway starting...");
+    }
 
     // ── Database ─────────────────────────────────────────────────
-    let config_db = if let Some(ref url) = config.database_url {
+    let config_db = if is_proxy_only {
+        None
+    } else if let Some(ref url) = config.database_url {
         match web_ui::config_db::ConfigDb::connect(url).await {
             Ok(db) => {
                 tracing::info!("Connected to PostgreSQL database");
@@ -87,14 +94,16 @@ async fn main() -> Result<()> {
     };
 
     // ── Setup state ─────────────────────────────────────────────────
-    let mut setup_complete_flag = if let Some(ref db) = config_db {
+    let mut setup_complete_flag = if is_proxy_only {
+        true
+    } else if let Some(ref db) = config_db {
         db.is_setup_complete().await
     } else {
         false
     };
 
     // Seed initial admin user from env vars (only on first run, before any users exist)
-    if !setup_complete_flag {
+    if !is_proxy_only && !setup_complete_flag {
         if let Some(ref db) = config_db {
             let initial_email = std::env::var("INITIAL_ADMIN_EMAIL").ok();
             let initial_password = std::env::var("INITIAL_ADMIN_PASSWORD").ok();
@@ -199,13 +208,15 @@ async fn main() -> Result<()> {
 
     let setup_complete = Arc::new(AtomicBool::new(setup_complete_flag));
 
-    if setup_complete_flag {
+    if setup_complete_flag && !is_proxy_only {
         if let Some(ref db) = config_db {
             db.load_into_config(&mut config)
                 .await
                 .context("Failed to load config from database")?;
             tracing::info!("Configuration loaded from database");
         }
+    } else if is_proxy_only {
+        tracing::info!("Proxy-only mode — skipping database config");
     } else {
         tracing::warn!("Setup not complete — starting in setup-only mode");
         tracing::warn!("Visit the web UI to complete initial setup");
@@ -219,7 +230,15 @@ async fn main() -> Result<()> {
     tracing::debug!("Debug mode: {:?}", config.debug_mode);
 
     // ── Auth manager ────────────────────────────────────────────────
-    let app_auth_manager = if setup_complete_flag {
+    let app_auth_manager = if is_proxy_only {
+        let am = auth::AuthManager::new_from_env(&config)
+            .context("Failed to create auth manager from env vars")?;
+        tracing::info!("Bootstrapping proxy-only credentials...");
+        am.bootstrap_proxy_credentials()
+            .await
+            .context("Failed to bootstrap proxy credentials. Check KIRO_REFRESH_TOKEN.")?;
+        am
+    } else if setup_complete_flag {
         init_app_auth_from_config_db(&config, &config_db).await?
     } else {
         auth::AuthManager::new_placeholder(
@@ -304,10 +323,18 @@ async fn main() -> Result<()> {
     // Initialise Datadog OTLP metrics pipeline (no-op when DD_AGENT_HOST is unset)
     let otel_metrics_provider = datadog::init_otel_metrics();
 
+    // Compute proxy API key hash at startup for constant-time comparison in middleware
+    let proxy_api_key_hash = config.proxy.as_ref().map(|p| {
+        use sha2::{Digest, Sha256};
+        let hash: [u8; 32] = Sha256::digest(p.api_key.as_bytes()).into();
+        hash
+    });
+
     let auth_manager = Arc::new(tokio::sync::RwLock::new(app_auth_manager));
     let config_arc = Arc::new(RwLock::new(config.clone()));
 
     let mut app_state = routes::AppState {
+        proxy_api_key_hash,
         model_cache: model_cache.clone(),
         auth_manager: Arc::clone(&auth_manager),
         http_client: http_client.clone(),
@@ -376,7 +403,7 @@ async fn main() -> Result<()> {
         tracing::info!("Background tasks started (token refresh, session cleanup)");
     }
 
-    let app = build_app(app_state);
+    let app = build_app(app_state, is_proxy_only);
 
     // Use tuple form for lookup_host to properly handle IPv6 addresses like ::1
     let mut resolved_addrs =
@@ -496,7 +523,7 @@ fn add_hidden_models(cache: &cache::ModelCache) {
 }
 
 /// Build the application with all routes and middleware
-fn build_app(state: routes::AppState) -> axum::Router {
+fn build_app(state: routes::AppState, is_proxy_only: bool) -> axum::Router {
     use axum::Router;
 
     let health_routes = routes::health_routes();
@@ -509,14 +536,17 @@ fn build_app(state: routes::AppState) -> axum::Router {
         axum::middleware::from_fn_with_state(state.clone(), crate::web_ui::setup_guard),
     );
 
-    let web_ui = web_ui::web_ui_routes(state.clone());
-
-    Router::new()
+    let mut app = Router::new()
         .merge(health_routes)
         .merge(openai_routes)
-        .merge(anthropic_routes)
-        .merge(web_ui)
-        .layer(middleware::cors_layer())
+        .merge(anthropic_routes);
+
+    if !is_proxy_only {
+        let web_ui = web_ui::web_ui_routes(state.clone());
+        app = app.merge(web_ui);
+    }
+
+    app.layer(middleware::cors_layer())
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::debug_middleware,
@@ -570,6 +600,9 @@ fn print_startup_banner(config: &config::Config) {
 
     println!("{}", banner);
     println!("  Version:     {}", env!("CARGO_PKG_VERSION"));
+    if config.is_proxy_only() {
+        println!("  Mode:        proxy-only (no DB, no Web UI)");
+    }
     println!(
         "  Server:      http://{}:{}",
         config.server_host, config.server_port

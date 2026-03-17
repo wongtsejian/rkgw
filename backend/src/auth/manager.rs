@@ -99,6 +99,56 @@ impl AuthManager {
         })
     }
 
+    /// Create an AuthManager from environment variables (proxy-only mode).
+    /// No database required — credentials come from env vars set by entrypoint.sh.
+    pub fn new_from_env(config: &crate::config::Config) -> Result<Self> {
+        let proxy = config
+            .proxy
+            .as_ref()
+            .context("ProxyConfig is required for proxy-only mode")?;
+
+        let refresh_token = proxy
+            .kiro_refresh_token
+            .clone()
+            .context("KIRO_REFRESH_TOKEN is required for proxy-only mode")?;
+
+        let credentials = Credentials {
+            refresh_token,
+            access_token: None,
+            expires_at: None,
+            profile_arn: None,
+            region: config.kiro_region.clone(),
+            client_id: proxy.kiro_client_id.clone(),
+            client_secret: proxy.kiro_client_secret.clone(),
+            sso_region: proxy.kiro_sso_region.clone(),
+            scopes: None,
+        };
+
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("Failed to create HTTP client")?;
+
+        Ok(Self {
+            credentials: Arc::new(RwLock::new(credentials)),
+            access_token: Arc::new(RwLock::new(None)),
+            expires_at: Arc::new(RwLock::new(None)),
+            client,
+            config_db: None,
+            refresh_threshold: config.token_refresh_threshold as i64,
+        })
+    }
+
+    /// Bootstrap proxy-only credentials by performing an initial token refresh.
+    /// Validates that the credentials are valid and populates the access token.
+    pub async fn bootstrap_proxy_credentials(&self) -> Result<()> {
+        self.get_access_token()
+            .await
+            .context("Failed to bootstrap proxy credentials")?;
+        tracing::info!("Proxy-only credentials bootstrapped successfully");
+        Ok(())
+    }
+
     /// Create a new AuthManager from the gateway's config database.
     ///
     /// Loads credentials (refresh token + OAuth client creds) from ConfigDb.
@@ -151,6 +201,11 @@ impl AuthManager {
     /// Refresh the access token
     async fn refresh_token(&self) -> Result<()> {
         tracing::debug!("Refreshing access token...");
+
+        // Re-check: if another concurrent request already refreshed, skip
+        if !self.is_token_expiring_soon().await {
+            return Ok(());
+        }
 
         let mut creds = self.credentials.write().await;
 
