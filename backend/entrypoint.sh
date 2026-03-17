@@ -112,11 +112,9 @@ if [ -z "${KIRO_REFRESH_TOKEN:-}" ]; then
         export KIRO_CLIENT_ID="$CACHED_OIDC_ID"
         export KIRO_CLIENT_SECRET="$CACHED_OIDC_SEC"
     else
-        # Skip device flow if explicitly disabled or non-interactive
+        # Skip device flow if explicitly disabled
         if [ "${SKIP_DEVICE_FLOWS:-}" = "true" ]; then
             echo "  Skipping Kiro device flow (SKIP_DEVICE_FLOWS=true)"
-        elif [ ! -t 0 ] && [ "${SKIP_DEVICE_FLOWS:-}" != "false" ]; then
-            echo "  Non-interactive mode detected, skipping Kiro device flow"
         else
         echo ""
         echo "┌─────────────────────────────────────────────────────────┐"
@@ -268,10 +266,6 @@ fi
 # when the token is not set and not cached.
 
 run_copilot_device_flow() {
-    if [ ! -t 0 ] && [ "${SKIP_DEVICE_FLOWS:-}" != "false" ]; then
-        echo "  Non-interactive mode detected, skipping Copilot device flow"
-        return 0
-    fi
     echo ""
     echo "┌─────────────────────────────────────────────────────────┐"
     echo "│  GitHub Copilot — Device Code Authorization              │"
@@ -381,10 +375,6 @@ run_copilot_device_flow() {
 }
 
 run_qwen_device_flow() {
-    if [ ! -t 0 ] && [ "${SKIP_DEVICE_FLOWS:-}" != "false" ]; then
-        echo "  Non-interactive mode detected, skipping Qwen device flow"
-        return 0
-    fi
     echo ""
     echo "┌─────────────────────────────────────────────────────────┐"
     echo "│  Qwen — Device Code Authorization                       │"
