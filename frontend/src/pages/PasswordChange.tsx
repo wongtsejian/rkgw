@@ -89,6 +89,7 @@ export function PasswordChange() {
                 autoComplete="current-password"
                 required
                 autoFocus
+                disabled={submitting}
               />
               <button
                 type="button"
@@ -139,6 +140,7 @@ export function PasswordChange() {
               autoComplete="new-password"
               required
               minLength={8}
+              disabled={submitting}
             />
             <button
               type="button"
@@ -188,6 +190,7 @@ export function PasswordChange() {
               autoComplete="new-password"
               required
               minLength={8}
+              disabled={submitting}
             />
             <button
               type="button"

@@ -245,6 +245,7 @@ export function UserTable() {
               onChange={(e) => setResetPassword(e.target.value)}
               minLength={8}
               autoFocus
+              disabled={resetting}
             />
             <div className="modal-actions">
               <button type="button" onClick={() => setResetUserId(null)}>

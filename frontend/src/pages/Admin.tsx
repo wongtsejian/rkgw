@@ -322,6 +322,7 @@ export function Admin() {
                 value={newEmail}
                 onChange={(e) => setNewEmail(e.target.value)}
                 required
+                disabled={creating}
               />
               <input
                 className="config-input"
@@ -330,6 +331,7 @@ export function Admin() {
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
                 required
+                disabled={creating}
               />
             </div>
             <div className="create-user-row">
@@ -341,11 +343,13 @@ export function Admin() {
                 onChange={(e) => setNewPassword(e.target.value)}
                 minLength={8}
                 required
+                disabled={creating}
               />
               <select
                 className="config-input"
                 value={newRole}
                 onChange={(e) => setNewRole(e.target.value as "admin" | "user")}
+                disabled={creating}
               >
                 <option value="user">user</option>
                 <option value="admin">admin</option>
