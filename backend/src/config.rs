@@ -91,6 +91,10 @@ pub struct Config {
     pub google_client_id: String,
     pub google_client_secret: String,
     pub google_callback_url: String,
+
+    // Initial admin seeding (env vars, used by validate to allow password-only auth)
+    pub initial_admin_email: Option<String>,
+    pub initial_admin_password: Option<String>,
 }
 
 impl std::fmt::Debug for Config {
@@ -127,6 +131,8 @@ impl std::fmt::Debug for Config {
             .field("google_client_id", &self.google_client_id)
             .field("google_client_secret", &"[REDACTED]")
             .field("google_callback_url", &self.google_callback_url)
+            .field("initial_admin_email", &self.initial_admin_email)
+            .field("initial_admin_password", &self.initial_admin_password.as_ref().map(|_| "[REDACTED]"))
             .finish()
     }
 }
@@ -187,6 +193,8 @@ impl Config {
             google_client_id: String::new(),
             google_client_secret: String::new(),
             google_callback_url: String::new(),
+            initial_admin_email: None,
+            initial_admin_password: None,
         }
     }
 
@@ -265,6 +273,10 @@ impl Config {
         config.google_client_secret = std::env::var("GOOGLE_CLIENT_SECRET").unwrap_or_default();
         config.google_callback_url = std::env::var("GOOGLE_CALLBACK_URL").unwrap_or_default();
 
+        // Initial admin seeding
+        config.initial_admin_email = std::env::var("INITIAL_ADMIN_EMAIL").ok().filter(|s| !s.is_empty());
+        config.initial_admin_password = std::env::var("INITIAL_ADMIN_PASSWORD").ok().filter(|s| !s.is_empty());
+
         Ok(config)
     }
 
@@ -283,21 +295,30 @@ impl Config {
             }
         }
 
-        // Google SSO is the only auth path — required for the web UI
-        if self.google_client_id.is_empty() {
+        let has_password_auth = self.initial_admin_email.is_some()
+            && self.initial_admin_password.is_some();
+        let has_google_sso = !self.google_client_id.is_empty();
+
+        // At least one auth method must be configured
+        if !has_password_auth && !has_google_sso {
             anyhow::bail!(
-                "GOOGLE_CLIENT_ID is required. \
-                 Google SSO is the only auth path — the gateway is unusable without it."
+                "No authentication method configured. Set either \
+                 GOOGLE_CLIENT_ID (+ SECRET + CALLBACK_URL) for Google SSO, or \
+                 INITIAL_ADMIN_EMAIL + INITIAL_ADMIN_PASSWORD for password auth."
             );
         }
-        if self.google_callback_url.is_empty() {
-            anyhow::bail!(
-                "GOOGLE_CALLBACK_URL is required when GOOGLE_CLIENT_ID is set. \
-                 No default is provided because SERVER_HOST=0.0.0.0 in Docker makes any auto-derived default broken."
-            );
-        }
-        if self.google_client_secret.is_empty() {
-            anyhow::bail!("GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is set.");
+
+        // If Google SSO fields are partially set, require all of them
+        if has_google_sso {
+            if self.google_callback_url.is_empty() {
+                anyhow::bail!(
+                    "GOOGLE_CALLBACK_URL is required when GOOGLE_CLIENT_ID is set. \
+                     No default is provided because SERVER_HOST=0.0.0.0 in Docker makes any auto-derived default broken."
+                );
+            }
+            if self.google_client_secret.is_empty() {
+                anyhow::bail!("GOOGLE_CLIENT_SECRET is required when GOOGLE_CLIENT_ID is set.");
+            }
         }
 
         Ok(())
@@ -437,17 +458,22 @@ mod tests {
         assert_eq!(config.google_callback_url, "");
         assert_eq!(config.gateway_mode, GatewayMode::Full);
         assert!(config.proxy.is_none());
+        assert!(config.initial_admin_email.is_none());
+        assert!(config.initial_admin_password.is_none());
     }
 
     #[test]
-    fn test_validate_google_client_id_required() {
+    fn test_validate_requires_at_least_one_auth_method() {
         let config = Config {
             google_client_id: String::new(),
             ..Config::with_defaults()
         };
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("GOOGLE_CLIENT_ID"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("No authentication method configured"));
     }
 
     #[test]
@@ -515,6 +541,37 @@ mod tests {
             ..Config::with_defaults()
         };
         assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_allows_password_only_auth() {
+        let config = Config {
+            google_client_id: String::new(),
+            google_client_secret: String::new(),
+            google_callback_url: String::new(),
+            initial_admin_email: Some("admin@example.com".to_string()),
+            initial_admin_password: Some("test-password-123".to_string()),
+            ..Config::with_defaults()
+        };
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_google_partial_config_fails_with_password_auth() {
+        let config = Config {
+            google_client_id: "some-id".to_string(),
+            google_client_secret: String::new(),
+            google_callback_url: String::new(),
+            initial_admin_email: Some("admin@example.com".to_string()),
+            initial_admin_password: Some("test-password-123".to_string()),
+            ..Config::with_defaults()
+        };
+        let result = config.validate();
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("GOOGLE_CALLBACK_URL"));
     }
 
     #[test]

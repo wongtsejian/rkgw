@@ -343,6 +343,12 @@ pub async fn google_auth_callback(
         return redirect_login_error(error_type);
     }
 
+    if client_id.is_empty() || client_secret.is_empty() || callback_url.is_empty() {
+        return Err(ApiError::ConfigError(
+            "Google OAuth not configured (GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_CALLBACK_URL)".to_string(),
+        ));
+    }
+
     // Validate required params
     let code = params
         .code
@@ -644,7 +650,7 @@ pub async fn status(State(state): State<AppState>) -> Json<serde_json::Value> {
     Json(json!({
         "setup_complete": has_users,
         "google_configured": google_configured,
-        "auth_google_enabled": auth_google_enabled,
+        "auth_google_enabled": auth_google_enabled && google_configured,
         "auth_password_enabled": auth_password_enabled,
     }))
 }
