@@ -507,6 +507,11 @@ pub async fn google_auth_callback(
         }
     }
 
+    config_db
+        .set_google_linked(user_id, true)
+        .await
+        .map_err(ApiError::Internal)?;
+
     tracing::info!(user_id = %user_id, email = %email, role = %role, "User authenticated via Google SSO");
 
     // Create session
