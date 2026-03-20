@@ -715,27 +715,24 @@ mod openai_error_tests {
             json["type"].is_null()
         }
 
-        // Normal path
-        assert!(has_no_top_level_type(OpenAiApiError(ApiError::AuthError("x".into()))).await);
-        // Early-return paths
-        assert!(
-            has_no_top_level_type(OpenAiApiError(ApiError::ContextLengthExceeded("x".into())))
-                .await
-        );
-        assert!(
-            has_no_top_level_type(OpenAiApiError(ApiError::GuardrailBlocked {
+        let cases = [
+            // Normal path
+            ApiError::AuthError("x".to_string()),
+            // Early-return paths
+            ApiError::ContextLengthExceeded("x".to_string()),
+            ApiError::GuardrailBlocked {
                 violations: vec![],
                 processing_time_ms: 0,
-            }))
-            .await
-        );
-        assert!(
-            has_no_top_level_type(OpenAiApiError(ApiError::GuardrailWarning {
+            },
+            ApiError::GuardrailWarning {
                 violations: vec![],
                 processing_time_ms: 0,
                 redacted_content: String::new(),
-            }))
-            .await
-        );
+            },
+        ];
+
+        for err in cases {
+            assert!(has_no_top_level_type(OpenAiApiError(err)).await);
+        }
     }
 }
