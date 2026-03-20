@@ -5,7 +5,7 @@ import { useSession } from "../components/SessionGate";
 
 export function PasswordChange() {
   const navigate = useNavigate();
-  const { user } = useSession();
+  const { user, refreshSession } = useSession();
   const isInitialSetup = user.auth_method !== "password";
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -32,6 +32,7 @@ export function PasswordChange() {
     setSubmitting(true);
     try {
       await changePassword(isInitialSetup ? "" : currentPassword, newPassword);
+      await refreshSession();
       navigate("/", { replace: true });
     } catch (err) {
       setError(

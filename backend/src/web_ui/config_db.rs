@@ -4004,7 +4004,7 @@ impl ConfigDb {
                         SUM(cost) as total_cost,
                         COUNT(*) as request_count
                  FROM usage_records
-                 WHERE user_id = $1 AND DATE(created_at) BETWEEN $2 AND $3
+                 WHERE user_id = $1 AND DATE(created_at) BETWEEN $2::date AND $3::date
                  GROUP BY {}
                  ORDER BY group_key",
                 group_col, group_col
@@ -4023,7 +4023,7 @@ impl ConfigDb {
                         SUM(cost) as total_cost,
                         COUNT(*) as request_count
                  FROM usage_records
-                 WHERE DATE(created_at) BETWEEN $1 AND $2
+                 WHERE DATE(created_at) BETWEEN $1::date AND $2::date
                  GROUP BY {}
                  ORDER BY group_key",
                 group_col, group_col
@@ -4076,7 +4076,7 @@ impl ConfigDb {
                     COUNT(ur.id) as request_count
              FROM users u
              LEFT JOIN usage_records ur ON u.id = ur.user_id
-                 AND DATE(ur.created_at) BETWEEN $1 AND $2
+                 AND DATE(ur.created_at) BETWEEN $1::date AND $2::date
              GROUP BY u.id, u.email
              ORDER BY total_cost DESC",
         )
