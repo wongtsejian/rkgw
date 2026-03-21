@@ -23,6 +23,13 @@ Full lifecycle feature implementation. Spawns teams, assigns tasks, monitors pro
 
 ---
 
+## Critical Constraints
+
+- **In-process teammate mode only** — all agents MUST run in-process (`teammateMode: "in-process"`). Never use tmux, iTerm split panes, or any other mode. Cycle between agents with Shift+Down.
+- **Always spawn all 7 agents** — no conditional composition or presets
+- **Feature branch required** — never work directly on main (Phase 3 enforces this)
+- **Agents stay idle after completion** — use `/team-shutdown` to terminate
+
 ## Full Lifecycle
 
 ### Phase 1: Load Context

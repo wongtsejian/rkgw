@@ -21,6 +21,12 @@ allowed-tools:
 
 Analyze scope, explore the codebase, and produce structured implementation plans.
 
+## Critical Constraints
+
+- **In-process teammate mode only** — all agents MUST run in-process (`teammateMode: "in-process"`). Never use tmux, iTerm split panes, or any other mode. Cycle between agents with Shift+Down.
+- **Always spawn all 7 agents** — no conditional composition or presets
+- **Codex review gate required** — no plan is approved for `/team-implement` until Phase 6 passes
+
 ## Phase 1: Load Project Context
 
 1. Read `CLAUDE.md` Service Map to identify all services and their verification commands

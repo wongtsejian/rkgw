@@ -24,6 +24,7 @@ Refer to `references/review-dimensions.md` for detailed per-dimension checklists
 
 ## Critical Constraints
 
+- **In-process teammate mode only** — all agents MUST run in-process (`teammateMode: "in-process"`). Never use tmux, iTerm split panes, or any other mode. Cycle between agents with Shift+Down.
 - **Agent teams required** — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` must be set
 - **Report only** — never auto-fix findings; reviewers report issues but do not modify code
 - **Deduplicate findings** — merge identical findings across reviewers (same file:line, same issue) into a single entry crediting all dimensions

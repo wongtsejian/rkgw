@@ -24,6 +24,7 @@ See `references/hypothesis-testing.md` for templates, decision trees, and Harban
 
 ## Critical Constraints
 
+- **In-process teammate mode only** — all agents MUST run in-process (`teammateMode: "in-process"`). Never use tmux, iTerm split panes, or any other mode. Cycle between agents with Shift+Down.
 - **Agent teams required** — `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` must be set
 - **Read-only investigators** — investigators must not modify code; their sole job is to collect evidence and report verdicts
 - **Formal evidence standards** — all evidence must be classified by type (Direct, Correlational, Testimonial, Absence) with file:line citations

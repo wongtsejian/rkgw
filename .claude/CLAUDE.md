@@ -35,6 +35,14 @@ This directory contains the multi-agent workflow system for Harbangan. See [READ
     └── google-sso-multi-user-rbac.md  # Auth migration plan
 ```
 
+## Agent Team Rules
+
+- **In-process teammate mode only** — all agents MUST run in-process (`teammateMode: "in-process"`). Never use tmux, iTerm split panes, or any other mode.
+- **Always spawn all 7 agents** — no conditional composition or presets
+- **Feature branch required** — never work directly on main
+- **Agents stay idle after completion** — use `/team-shutdown` to terminate
+- **File ownership enforced by hook** — agents cannot edit files outside their owned scope
+
 ## Git Workflow
 
 All agent work must follow the PR flow — never commit directly to `main`.
