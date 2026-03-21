@@ -77,6 +77,7 @@ Write plan to `.claude/plans/` with:
 3. **Wave Structure** — dependency graph with tasks per wave
 4. **Interface Contracts** — API shapes, type definitions shared between services
 5. **Verification Commands** — per-service quality gates from CLAUDE.md
+6. **Branch Name** — `feat/{feature-slug}` or `fix/{feature-slug}` per git workflow conventions
 
 ### Plan File Format
 
@@ -110,4 +111,7 @@ Write plan to `.claude/plans/` with:
 
 ## Verification
 ...
+
+## Branch
+`feat/{feature-slug}` or `fix/{feature-slug}`
 ```

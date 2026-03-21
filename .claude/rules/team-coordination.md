@@ -82,7 +82,7 @@ Anti-patterns: circular dependencies (deadlock), unnecessary sequencing, star bo
 | Direct (same branch) | 2-3 agents, strict ownership | Most features |
 | Sub-branch | 4+ agents, overlapping concerns | Complex multi-module features |
 | Trunk-based + flags | CI/CD, incremental rollout | Natural — uses existing config flags |
-| Worktree isolation | Parallel teams, overlapping files | Multi-feature development |
+| Feature branches | Parallel features on separate branches | Multi-feature development |
 
 Conflict resolution hierarchy: contract wins → tests decide → file owner merges manually.
 
@@ -94,4 +94,4 @@ Respawn protocol: check git log → note remaining tasks → kill agent → resp
 
 Prevention: max 4-5 subtasks per agent per wave, prefer many small tasks, proactive respawn after phase completion.
 
-Lazy spawning: Wave 1 agents spawn immediately, Wave 2+ deferred until dependencies resolve.
+All agents are spawned at once. Agents with later-wave tasks wait until dependencies resolve.

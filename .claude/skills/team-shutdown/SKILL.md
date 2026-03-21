@@ -1,6 +1,6 @@
 ---
 name: team-shutdown
-description: Gracefully shut down a running agent team. Commits pending changes, terminates agents, and cleans up worktrees. Use when user says 'shutdown team', 'stop agents', 'kill team', 'terminate agents', or 'clean up team'.
+description: Gracefully shut down a running agent team. Commits pending changes and terminates agents. Use when user says 'shutdown team', 'stop agents', 'kill team', 'terminate agents', or 'clean up team'.
 argument-hint: "[team-name]"
 allowed-tools:
   - Bash
@@ -49,23 +49,21 @@ If there are incomplete tasks, warn the user and ask for confirmation via AskUse
 
 ### 3. Save Work
 
-If the team has a worktree at `.trees/{team-name}`:
-
 1. Check for uncommitted changes:
    ```bash
-   cd .trees/{team-name} && git status --porcelain
+   git status --porcelain
    ```
 2. If changes exist, commit them:
    ```bash
-   cd .trees/{team-name} && git add -A && git commit -m "chore: save work-in-progress before team shutdown"
+   git add -A && git commit -m "chore: save work-in-progress before team shutdown"
    ```
 3. Check for unpushed commits:
    ```bash
-   cd .trees/{team-name} && git log @{u}.. --oneline 2>/dev/null
+   git log @{u}.. --oneline 2>/dev/null
    ```
 4. If unpushed commits exist, push them:
    ```bash
-   cd .trees/{team-name} && git push
+   git push
    ```
 
 ### 4. Terminate Agents
@@ -86,11 +84,6 @@ Wait briefly for each agent to acknowledge.
 ### 5. Clean Up Resources
 
 1. `TeamDelete` to remove team config and task directories
-2. If worktree exists:
-   ```bash
-   git worktree remove .trees/{team-name}
-   git worktree prune
-   ```
 
 ### 6. Report
 
@@ -99,6 +92,5 @@ Shutdown complete:
 - Team: {team-name}
 - Agents terminated: {count}
 - Tasks completed: {n}/{total}
-- Worktree: {removed / none}
 - Branch: {branch-name} (pushed / not pushed)
 ```

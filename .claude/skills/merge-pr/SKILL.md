@@ -1,8 +1,8 @@
 ---
 name: merge-pr
 description: |
-  Squash-merge the current branch's PR, clean up local/remote branches, prune
-  worktrees, and return to main. Use when user says 'merge', 'merge this PR',
+  Squash-merge the current branch's PR, clean up local/remote branches,
+  and return to main. Use when user says 'merge', 'merge this PR',
   'squash merge', 'merge and cleanup', or 'land this PR'.
 argument-hint: "[pr-number]"
 disable-model-invocation: true
@@ -49,9 +49,8 @@ Squash-merge, clean up branches, and return to main.
    ```
    If `-d` fails (not fully merged warning), ask user before using `-D`.
 
-7. **Clean up worktrees and pull**:
+7. **Pull latest**:
    ```bash
-   git worktree prune
    git pull --prune
    ```
 

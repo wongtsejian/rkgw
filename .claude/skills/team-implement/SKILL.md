@@ -46,17 +46,12 @@ Always spawn all 7 domain agents via `TeamCreate` + `Agent`:
 
 Agents without assigned tasks remain idle and available for ad-hoc work via `SendMessage`.
 
-### Phase 3: Worktree Resolution
+### Phase 3: Branch Creation
 
-Always create a worktree for team work to isolate changes from the main directory:
-
-1. Check for active teams: `ls .trees/ 2>/dev/null`
-2. Create worktree:
-   ```bash
-   BRANCH="feat/{feature-slug}"
-   git worktree add .trees/{team-name} -b $BRANCH
-   ```
-3. Record working directory in team config
+Create a feature branch for the implementation:
+```bash
+git checkout -b feat/{feature-slug}
+```
 
 ### Phase 4: Plan Decomposition
 
@@ -118,9 +113,8 @@ Cross-service validation:
 
 ### Phase 9: PR
 
-If worktree is active:
+Create PR from the feature branch:
 ```bash
-cd .trees/{team-name}
 git add -A && git commit -m "feat(scope): description"
 git push -u origin feat/{feature-slug}
 gh pr create --title "feat: ..." --body "## Summary\n..."
