@@ -10,7 +10,7 @@ This directory is the AI workflow infrastructure for Harbangan. It provides a fu
 ├── README.md                    # This file (full documentation)
 ├── settings.json                # Claude Code configuration
 ├── agents/                      # 7 agent definitions
-├── skills/                      # 8 invocable skills
+├── skills/                      # 9 invocable skills
 ├── agent-memory/                # Persistent per-agent memory
 ├── rules/                       # Coding standards + plan mode rules
 └── plans/                       # Implementation plans
@@ -41,41 +41,28 @@ Each agent is a `.md` file with YAML frontmatter defining its name, description,
 
 ---
 
-## Skills (8 total)
+## Skills (9 total)
 
 Skills are invocable via `/skill-name [arguments]`.
 
-### Team Skills (4) — Multi-Agent Orchestration
+### Team Skills (5) — Multi-Agent Orchestration
 
 | Skill | Purpose | Key Arguments |
 |-------|---------|---------------|
 | `/team-plan` | Analyze scope, explore codebase, produce plans | `"description" [--scope path]` |
-| `/team-implement` | Full lifecycle: spawn → assign → verify → PR → shutdown | `"description" [--preset name] [--worktree]` |
-| `/team-review` | Multi-dimensional code review | `[target] [--preset name] [--base branch]` |
+| `/team-implement` | Full lifecycle: spawn → assign → verify → PR | `"description"` |
+| `/team-review` | Multi-dimensional code review | `[target] [--base branch]` |
 | `/team-debug` | Hypothesis-driven debugging | `"error" [--scope path] [--hypotheses N]` |
+| `/team-shutdown` | Gracefully terminate a running team | `[team-name]` |
+
+All team skills spawn all 7 domain agents by default. Agents without tasks remain idle and available for ad-hoc work. Use `/team-shutdown` to terminate.
 
 **team-implement sub-commands:**
 
 | Flag | Purpose |
 |------|---------|
 | `--status team-name` | Show team status (replaces /team-status) |
-| `--delegate team-name` | Task assignment dashboard (replaces /team-delegate) |
-| `--shutdown team-name` | Graceful team termination (replaces /team-shutdown) |
-
-**Team presets:**
-
-| Preset | Composition | Use When |
-|--------|-------------|----------|
-| `fullstack` | coordinator + all service agents + QA agents | Full-stack feature |
-| `backend-feature` | coordinator + backend + database + backend-qa | Backend-only feature |
-| `frontend-feature` | coordinator + frontend + frontend-qa | Frontend-only feature |
-| `infra` | coordinator + infra + backend | Infrastructure changes |
-| `docs` | coordinator + document-writer | Documentation |
-| `research` | 3 general-purpose agents | Codebase exploration |
-| `security` | 4 reviewer agents | Security audit |
-| `migration` | coordinator + 2 service + 1 reviewer | Data/schema migration |
-| `refactor` | coordinator + 2 service + 1 reviewer | Code refactoring |
-| `hotfix` | 1 service + 1 QA agent | Urgent bug fix |
+| `--delegate team-name` | Task assignment dashboard |
 
 ### Git Operations (1) — PR Lifecycle
 
@@ -104,11 +91,11 @@ Note: Team coordination guidance (file ownership, communication protocols, team 
 
 ```
 /team-plan (explore + design)   →  produce plan in .claude/plans/
-/team-implement {plan}          →  spawn → assign → verify → PR → shutdown
+/team-implement {plan}          →  spawn → assign → verify → PR
 TaskList (ephemeral)            →  /team-implement --delegate (assign to agents)
-/team-implement --status        →  monitor progress (TaskList)
+/team-status                    →  monitor progress (TaskList)
 Quality Gates (from CLAUDE.md)  →  verify completion
-/team-implement --shutdown      →  clean up ephemeral state
+/team-shutdown                  →  terminate agents, clean up resources
 ```
 
 ---

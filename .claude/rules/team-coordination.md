@@ -2,15 +2,9 @@
 
 Applies to all multi-agent team sessions.
 
-## Team Sizing
+## Team Spawning
 
-| Complexity | Team Size | When |
-|------------|-----------|------|
-| Simple | 2-3 agents | Single-service change, one layer |
-| Moderate | 3-4 agents | Cross-layer (backend + frontend) |
-| Complex | 4-5 agents | Multi-service, infrastructure changes |
-
-Heuristics: 1 agent per architectural layer + 1 for QA if touching streaming/auth/converters. Never exceed 5 agents — split into multiple tracks instead.
+All 7 domain agents are always spawned for every team skill invocation. Agents without assigned tasks remain idle and available for ad-hoc work via `SendMessage`. Use `/team-shutdown` to terminate.
 
 ## File Ownership
 
@@ -19,7 +13,8 @@ One owner per file. No exceptions.
 | File / Area | Owner |
 |-------------|-------|
 | `backend/src/**` | rust-backend-engineer |
-| `backend/src/web_ui/config_db.rs` (DDL) | database-engineer |
+| `backend/src/web_ui/config_db.rs` (DDL blocks) | database-engineer |
+| `e2e-tests/**` | frontend-qa |
 | `frontend/src/**` | react-frontend-engineer |
 | `docker-compose*.yml`, `**/Dockerfile` | devops-engineer |
 
@@ -31,6 +26,7 @@ When Agent B needs a change in Agent A's file: B sends a DM describing the chang
 |-------------|-------|--------------------|
 | `backend/src/routes/mod.rs` | rust-backend-engineer | DM with route spec |
 | `backend/Cargo.toml` | rust-backend-engineer | DM with dependency + version |
+| `backend/src/web_ui/config_db.rs` | database-engineer (DDL) + rust-backend-engineer (queries) | DM to the relevant owner |
 | `frontend/package.json` | react-frontend-engineer | DM with package + version |
 | `docker-compose.yml` | devops-engineer | DM with service/port changes |
 | `.env.example` | devops-engineer | DM with new variable + description |

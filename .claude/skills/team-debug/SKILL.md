@@ -11,7 +11,6 @@ allowed-tools:
   - SendMessage
   - AskUserQuestion
   - TeamCreate
-  - TeamDelete
   - Agent
   - TaskCreate
   - TaskUpdate
@@ -77,15 +76,6 @@ Route to the appropriate investigator agent(s) based on error indicators.
 | Docker build failure, container crash, port conflict | Infrastructure | devops-engineer |
 | PostgreSQL connection error, migration failure, query timeout | Backend (Database) | rust-backend-engineer |
 
-### Debug Presets
-
-| Preset | Agents |
-|--------|--------|
-| backend | rust-backend-engineer |
-| frontend | react-frontend-engineer |
-| infra | devops-engineer |
-| fullstack | rust-backend-engineer + react-frontend-engineer + devops-engineer |
-
 ---
 
 ## Phase 2: Hypothesis Generation
@@ -147,7 +137,7 @@ Assigned to: {Investigator agent}
 
 ## Phase 3: Investigation
 
-### 3.1 Spawn Investigators
+### 3.1 Spawn All Domain Agents
 
 Generate team name: `debug-{short-id}`.
 
@@ -156,19 +146,20 @@ Generate team name: `debug-{short-id}`.
    TeamCreate({ team_name: "debug-{short-id}", description: "ACH debug investigation" })
    ```
 
-2. Spawn investigator agents using the `Agent` tool with `team_name` parameter. Use the domain-specific agents identified in Phase 1:
-   ```
-   Agent({
-     name: "{agent-name}",
-     team_name: "debug-{short-id}",
-     subagent_type: "{agent-name}",
-     description: "Investigate hypothesis {N}",
-     prompt: "You are an investigator on debug team. Read-only — do not modify code. {hypothesis details}",
-     run_in_background: true
-   })
-   ```
+2. Spawn all 7 domain agents via the `Agent` tool with `team_name` parameter:
+   - rust-backend-engineer
+   - react-frontend-engineer
+   - database-engineer
+   - devops-engineer
+   - backend-qa
+   - frontend-qa
+   - document-writer
 
-   Spawn all investigators in parallel (single message with multiple Agent calls).
+   Spawn all agents in parallel (single message with multiple Agent calls).
+   All agents are read-only investigators — they must NOT modify code.
+
+3. Assign hypotheses to the most relevant agents based on the error domain classification.
+   Agents without assigned hypotheses remain idle and available for follow-up investigation.
 
 ### 3.2 Assign Investigations
 
@@ -324,8 +315,7 @@ Prevention:
   {additional test cases to add}
 ```
 
-### 6.2 Cleanup
+### 6.2 Save & Done
 
-- Terminate all investigator agents via `SendMessage` with `type: "shutdown_request"`
 - Save report to `~/.claude/teams/{team-name}/debug-report.md`
-- Use `TeamDelete` to remove team and task directories
+- Investigators remain idle after reporting. Use `/team-shutdown` to terminate the team when done.

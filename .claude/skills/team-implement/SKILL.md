@@ -1,7 +1,7 @@
 ---
 name: team-implement
-description: Full lifecycle feature implementation — spawns teams, assigns tasks, monitors progress, verifies quality, creates PRs, and shuts down. Use when user says 'implement this', 'build this feature', 'start working on X', or 'execute the plan'.
-argument-hint: "[feature-or-plan]"
+description: Full lifecycle feature implementation — spawns teams, assigns tasks, monitors progress, verifies quality, and creates PRs. Agents remain idle after completion — use /team-shutdown to terminate. Use when user says 'implement this', 'build this feature', 'start working on X', or 'execute the plan'.
+argument-hint: "[feature-or-plan-description]"
 allowed-tools:
   - Bash
   - Read
@@ -11,7 +11,6 @@ allowed-tools:
   - SendMessage
   - AskUserQuestion
   - TeamCreate
-  - TeamDelete
   - Agent
   - TaskCreate
   - TaskUpdate
@@ -20,7 +19,7 @@ allowed-tools:
 
 # Team Implement
 
-Full lifecycle feature implementation. Spawns teams, assigns tasks, monitors progress, verifies quality, creates PRs, and shuts down.
+Full lifecycle feature implementation. Spawns teams, assigns tasks, monitors progress, verifies quality, and creates PRs. Agents remain idle after completion — use `/team-shutdown` to terminate.
 
 ---
 
@@ -33,22 +32,19 @@ Full lifecycle feature implementation. Spawns teams, assigns tasks, monitors pro
 3. Read `.claude/agent-colors.json` for visual agent identification
 4. Check for existing plan files in `.claude/plans/` matching the feature description
 
-### Phase 2: Resolve Composition
+### Phase 2: Spawn All Agents
 
-Auto-detect team composition from affected services using the Service Map keywords. If ambiguous, ask the user via AskUserQuestion.
+Always spawn all 7 domain agents via `TeamCreate` + `Agent`:
 
-| Composition | Use When |
-|-------------|----------|
-| coordinator + all service agents + QA agents | Full-stack feature touching backend + frontend |
-| coordinator + backend + database + backend-qa | Backend-only feature |
-| coordinator + frontend + frontend-qa | Frontend-only feature |
-| coordinator + infra + backend | Infrastructure changes |
-| coordinator + document-writer | Documentation |
-| 3 general-purpose agents | Codebase exploration, investigation |
-| 4 reviewer agents (OWASP, auth, deps, config) | Security audit |
-| coordinator + 2 service agents + 1 reviewer | Data/schema migration |
-| coordinator + 2 service agents + 1 reviewer | Code refactoring |
-| 1 service agent + 1 QA agent | Urgent bug fix |
+1. rust-backend-engineer
+2. react-frontend-engineer
+3. database-engineer
+4. devops-engineer
+5. backend-qa
+6. frontend-qa
+7. document-writer
+
+Agents without assigned tasks remain idle and available for ad-hoc work via `SendMessage`.
 
 ### Phase 3: Worktree Resolution
 
@@ -77,17 +73,12 @@ For each task:
 - Define dependencies on other tasks
 - Specify verification commands
 
-### Phase 5: Spawn
+### Phase 5: Assign Waves
 
-Use lazy per-wave spawning:
-
-1. **Wave 1 agents**: Spawn immediately via `TeamCreate` + `Agent` with `team_name`
-2. **Wave 2+ agents**: Record as deferred in team config, spawn when previous wave completes
-
-For each agent spawn:
-- Use `isolation: "worktree"` if worktree is active
-- Set `mode: "bypassPermissions"` for autonomous execution
-- Match `subagent_type` to agent name from the registry
+All 7 agents are already spawned from Phase 2. Assign wave tasks to agents:
+- Agents with Wave 1 tasks start working immediately
+- Agents with later-wave tasks wait until dependencies resolve
+- Agents without tasks remain idle and available for ad-hoc requests
 
 ### Phase 6: Assign
 
@@ -135,21 +126,13 @@ git push -u origin feat/{feature-slug}
 gh pr create --title "feat: ..." --body "## Summary\n..."
 ```
 
-### Phase 10: Shutdown
-
-Ordered termination:
-1. Commit uncommitted changes in worktree
-2. Push unpushed commits
-3. Workers first, coordinator last
-4. `TeamDelete` for each agent
-5. Remove worktree: `git worktree remove .trees/{team-name} && git worktree prune`
-
-### Phase 11: Report
+### Phase 10: Report
 
 Output final status:
 - Work streams completed
 - Verification results (pass/fail per gate)
 - PR URL (if created)
+- Agents remain idle — use `/team-shutdown` when done
 
 ---
 
@@ -169,13 +152,4 @@ Interactive task management menu:
 
 Agent validation is dynamic — read team config for current members, never hardcode names.
 
-### Shutdown (`--shutdown team-name`)
-
-1. Check for uncommitted changes in worktree
-2. Check for unpushed commits
-3. Terminate workers first, coordinator last
-4. `TeamDelete` for each agent
-5. If worktree active:
-   - `git worktree remove .trees/{team-name}`
-   - `git worktree prune`
-6. Clean up team config
+Note: Use `/team-shutdown` to terminate the team when done.

@@ -1,7 +1,7 @@
 ---
 name: team-plan
-description: Analyze scope, explore codebase, and produce implementation plans. Spawns Explore agents for parallel investigation, consults domain expertise, and writes structured plans. Use when user says 'plan this feature', 'analyze scope', 'what would it take to build X', or 'explore before implementing'.
-argument-hint: "[feature-description] [--scope path] [--output plan|review]"
+description: Analyze scope, explore codebase, and produce implementation plans. Spawns all 7 domain agents for parallel investigation from their domain perspective, and writes structured plans. Use when user says 'plan this feature', 'analyze scope', 'what would it take to build X', or 'explore before implementing'.
+argument-hint: "[feature-description] [--scope path]"
 allowed-tools:
   - Bash
   - Read
@@ -10,6 +10,11 @@ allowed-tools:
   - Write
   - AskUserQuestion
   - Agent
+  - TeamCreate
+  - SendMessage
+  - TaskCreate
+  - TaskUpdate
+  - TaskList
 ---
 
 # Team Plan
@@ -22,30 +27,24 @@ Analyze scope, explore the codebase, and produce structured implementation plans
 2. Read `.claude/agents/*.md` to build agent registry (name, description, tools, ownership)
 3. Parse the user's feature description and `--scope` path (if provided)
 
-## Phase 2: Parallel Exploration
+## Phase 2: Domain Consultation
 
-Spawn up to 3 Explore agents in parallel, each focused on a domain perspective:
+Spawn all 7 domain agents via `TeamCreate` + `Agent` for parallel investigation:
 
-### Agent 1: Affected Code Areas
-- Search for files matching the feature scope
-- Identify existing patterns to follow
-- Map file dependencies
+Each agent investigates from its domain perspective:
+- **rust-backend-engineer**: Affected backend modules, existing patterns, type changes, error handling approach
+- **react-frontend-engineer**: Component structure, API integration points, styling approach
+- **database-engineer**: Schema impact, migration needs, query patterns
+- **devops-engineer**: Docker impact, env vars, deployment changes
+- **backend-qa**: Test coverage gaps, test patterns to follow
+- **frontend-qa**: E2E test scenarios, Playwright page objects to update
+- **document-writer**: Documentation gaps, API doc updates needed
 
-### Agent 2: Related Tests & Coverage
-- Find existing test files for affected modules
-- Identify coverage gaps
-- Note test patterns to follow
-
-### Agent 3: Integration Points & Dependencies
-- Map cross-service dependencies (API contracts, shared types)
-- Identify infrastructure implications
-- Check for migration needs
-
-Each agent searches from its domain perspective (backend patterns, frontend patterns, infra patterns).
+Agents without relevant findings report "no impact" and remain idle.
 
 ## Phase 3: Scope Analysis
 
-Using exploration results:
+Using consultation results:
 
 1. **Classify affected services** — map each change to a service from the Service Map
 2. **Identify file ownership boundaries** — one agent per file, no overlaps
@@ -73,12 +72,11 @@ Each wave lists:
 
 Write plan to `.claude/plans/` with:
 
-1. **Consultation Summary** — findings from each Explore agent
+1. **Consultation Summary** — findings from each domain agent
 2. **File Manifest** — files to create/modify, one owner per file
 3. **Wave Structure** — dependency graph with tasks per wave
 4. **Interface Contracts** — API shapes, type definitions shared between services
 5. **Verification Commands** — per-service quality gates from CLAUDE.md
-6. **Recommended Team Preset** — for `/team-implement`
 
 ### Plan File Format
 
@@ -86,9 +84,13 @@ Write plan to `.claude/plans/` with:
 # Plan: {feature-name}
 
 ## Consultation Summary
-- Backend: {findings}
-- Frontend: {findings}
-- Infrastructure: {findings}
+- rust-backend-engineer: {findings}
+- react-frontend-engineer: {findings}
+- database-engineer: {findings}
+- devops-engineer: {findings}
+- backend-qa: {findings}
+- frontend-qa: {findings}
+- document-writer: {findings}
 
 ## File Manifest
 | File | Action | Owner | Wave |
@@ -108,7 +110,4 @@ Write plan to `.claude/plans/` with:
 
 ## Verification
 ...
-
-## Recommended Preset
-`/team-implement --preset {name}`
 ```

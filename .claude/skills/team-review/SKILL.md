@@ -11,7 +11,6 @@ allowed-tools:
   - SendMessage
   - AskUserQuestion
   - TeamCreate
-  - TeamDelete
   - Agent
   - TaskCreate
   - TaskUpdate
@@ -63,17 +62,16 @@ Refer to `references/review-dimensions.md` for detailed per-dimension checklists
 | **Testing**       | Coverage, edge cases, mocking, test naming           | New functionality or refactors        |
 | **Accessibility** | WCAG 2.1 AA, keyboard nav, screen reader support     | Frontend/UI changes                   |
 
-### Recommended Presets
+### Always Spawn All 5 Reviewers
 
-| Changed Files Touch               | Default Dimensions                           |
-|------------------------------------|----------------------------------------------|
-| `backend/src/auth/`, `middleware/` | Security, Performance, Architecture          |
-| `backend/src/converters/`, `streaming/` | Performance, Architecture, Testing      |
-| `backend/src/routes/`, `web_ui/`   | Security, Performance, Architecture          |
-| `backend/src/guardrails/`  | Security, Architecture, Testing              |
-| `frontend/src/`                    | Architecture, Testing, Accessibility         |
-| `docker-compose*`, `Dockerfile`    | Security, Architecture                       |
-| Mixed backend + frontend           | Security, Performance, Architecture, Testing |
+Spawn all 5 dimension reviewers for every review:
+1. Security reviewer
+2. Performance reviewer
+3. Architecture reviewer
+4. Testing reviewer
+5. Accessibility reviewer
+
+Reviewers examining areas with no relevant changes report "no findings" for their dimension.
 
 ## Phase 3: Spawn Reviewers
 
@@ -222,7 +220,6 @@ Present the consolidated report:
 {Overall assessment and prioritized action items}
 ```
 
-## Phase 8: Cleanup
+## Phase 8: Done
 
-1. Send `shutdown_request` to all reviewer teammates via `SendMessage`
-2. Use `TeamDelete` to remove team and task directories
+Reviewers remain idle after reporting. Use `/team-shutdown` to terminate the team when done.

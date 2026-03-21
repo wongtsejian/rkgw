@@ -10,17 +10,19 @@ Before writing any non-trivial plan, you MUST consult domain agents for feasibil
 
 Use the Service Map in CLAUDE.md to determine which domains the task touches.
 
-### Step 2: Spawn domain consultants in parallel
+### Step 2: Spawn all domain agents for consultation
 
-For each affected service, spawn an Explore agent that reads the corresponding agent definition and investigates the codebase from that agent's perspective. Run all consultations in parallel:
+Spawn all 7 domain agents via `TeamCreate` + `Agent`. Each agent investigates from its domain perspective:
 
 | Affected Service | Agent to Consult | What to Ask |
 |-----------------|-----------------|-------------|
 | Backend (Rust/Axum) | `rust-backend-engineer` | Existing patterns, affected modules, type changes, error handling approach |
 | Frontend (React/TS) | `react-frontend-engineer` | Component structure, API integration points, styling approach, state management |
 | Infrastructure | `devops-engineer` | Docker impact, env vars, deployment changes |
+| Database | `database-engineer` | Schema impact, migration needs, query patterns |
 | Backend tests | `backend-qa` | Test coverage gaps, which test patterns to follow, integration test needs |
 | Frontend tests | `frontend-qa` | E2E test scenarios, Playwright page objects to update |
+| Documentation | `document-writer` | Documentation gaps, API doc updates needed |
 
 Prompt template for each consultant:
 ```
@@ -62,14 +64,6 @@ Structure tasks in waves for parallel execution:
   - Assigned to: `react-frontend-engineer`
 - **Wave 3** (verification): Unit tests, E2E tests
   - Assigned to: `backend-qa`, `frontend-qa`
-
-### Team Preset Recommendation
-
-Based on affected services, recommend a team preset:
-- Backend only → `backend-feature`
-- Frontend only → `frontend-feature`
-- Both → `fullstack`
-- Infrastructure → `infra`
 
 ### File Ownership
 
