@@ -1,21 +1,23 @@
 # Document Writer Memory
 
-## Documentation Drift Audit (2026-03-21)
-- See `drift-audit-findings.md` for full consolidated report
-- 7 major drift, 5 needs update, 4 accurate out of 16 gh-pages docs
-- 6 cross-cutting issues: Gemini removed, AppState refactored, password auth undocumented, OpenAI→OpenAI Codex, Google OAuth via Web UI not env vars, port confusion (8000 vs 9999)
+## Documentation Drift Audit (2026-03-22, post-PR #171 and #172)
+- See `drift-audit-findings.md` for consolidated report
+- PR #171 fixed most severe drift; PR #172 removed Qwen but didn't update gh-pages
+- Remaining: 4 stale, 3 needs update, 9 accurate, 1 low-priority
+- Key remaining issues: Gemini refs (2 files), "Kiro only" proxy claims (3 files), Vite→nginx (deployment.md), Google OAuth env vars (2 files)
 
 ## Key Source Code Facts
 - AppState defined in `backend/src/routes/state.rs` (NOT `routes/mod.rs` as some docs claim)
-- ProviderId enum: Kiro, Anthropic, OpenAICodex, Copilot, Qwen, Custom (NO Gemini)
+- ProviderId enum: Kiro, Anthropic, OpenAICodex, Copilot, Custom (5 total — NO Gemini, NO Qwen)
+- Qwen and Gemini model names explicitly rejected via `removed_provider_for_model()` in registry.rs
 - Providers stored as `providers: ProviderMap` (not individual fields)
 - Session cookie: `SameSite=Strict` (not Lax)
 - Streaming parser: `SseParser` with text-based JSON extraction (NOT binary AWS Event Stream)
-- Google OAuth configured via Web UI admin panel, NOT env vars
-- Password auth: `web_ui/password_auth.rs` (802 lines) with TOTP 2FA, rate limiting
+- Google OAuth configured via Web UI admin panel, NOT env vars (no GOOGLE_* in .env.example)
+- Password auth: `web_ui/password_auth.rs` with TOTP 2FA, rate limiting
 - Default port: 8000 in code; docker-compose overrides to 9999
-- Frontend runs Nginx on internal port 80, mapped to host 5173
-- Qwen URL: `dashscope-intl.aliyuncs.com/compatible-mode` (not `chat.qwen.ai`)
+- Frontend runs Nginx on internal port 80, mapped to host 5173 (NOT Vite dev server)
+- Proxy-only mode supports ALL providers via env vars (not Kiro only)
 
 ## gh-pages Documentation Structure
 - Location: `gh-pages/docs/`

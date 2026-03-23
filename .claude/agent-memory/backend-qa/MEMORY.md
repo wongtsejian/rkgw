@@ -1,7 +1,8 @@
 # Backend QA Memory
 
 ## Test Count Baseline
-- As of 2026-03-21 (post-Qwen removal): 817 tests pass (`cargo test --lib`, 11.08s)
+- As of 2026-03-22: 820 tests pass (`cargo test --lib`, 14.72s)
+- Previous: 817 (2026-03-21 post-Qwen removal, 11.08s)
 - Previous: 931 (2026-03-21 pre-removal), 779 (2026-03-12), 747 (2026-03-08)
 - ~114 tests removed with Qwen provider deletion (qwen.rs ~40, qwen_auth.rs ~38, registry ~28, others ~8)
 - 1 integration test file: `backend/tests/integration_test.rs` (requires `test-utils` feature, 19 tests)
