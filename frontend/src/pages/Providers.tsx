@@ -124,7 +124,9 @@ export function Providers() {
       .then((s) => setKiroConnected(s.has_token && !s.expired))
       .catch(() => {});
     getCopilotStatus()
-      .then((s) => setCopilotConnected(s.connected && !s.expired))
+      .then((s) =>
+        setCopilotConnected(s.connected && s.has_copilot_token && !s.expired),
+      )
       .catch(() => {});
   }
 

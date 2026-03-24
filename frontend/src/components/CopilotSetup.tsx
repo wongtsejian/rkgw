@@ -1,70 +1,90 @@
-import { useState, useEffect } from 'react'
-import { getCopilotStatus, startCopilotDeviceFlow, pollCopilotDeviceCode, disconnectCopilot } from '../lib/api'
-import type { CopilotStatus, CopilotDeviceCodeResponse } from '../lib/api'
-import { DeviceCodeDisplay } from './DeviceCodeDisplay'
-import { useToast } from './useToast'
+import { useState, useEffect } from "react";
+import {
+  getCopilotStatus,
+  startCopilotDeviceFlow,
+  pollCopilotDeviceCode,
+  disconnectCopilot,
+} from "../lib/api";
+import type { CopilotStatus, CopilotDeviceCodeResponse } from "../lib/api";
+import { DeviceCodeDisplay } from "./DeviceCodeDisplay";
+import { useToast } from "./useToast";
 
 export function CopilotSetup() {
-  const { showToast } = useToast()
-  const [status, setStatus] = useState<CopilotStatus | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [deviceAuth, setDeviceAuth] = useState<CopilotDeviceCodeResponse | null>(null)
-  const [starting, setStarting] = useState(false)
+  const { showToast } = useToast();
+  const [status, setStatus] = useState<CopilotStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [deviceAuth, setDeviceAuth] =
+    useState<CopilotDeviceCodeResponse | null>(null);
+  const [starting, setStarting] = useState(false);
 
   function loadStatus() {
     getCopilotStatus()
-      .then(s => { setStatus(s); setLoading(false) })
-      .catch(() => setLoading(false))
+      .then((s) => {
+        setStatus(s);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
   }
 
-  useEffect(() => { loadStatus() }, [])
+  useEffect(() => {
+    loadStatus();
+  }, []);
 
   async function handleStart() {
-    setStarting(true)
+    setStarting(true);
     try {
-      const result = await startCopilotDeviceFlow()
-      setDeviceAuth(result)
+      const result = await startCopilotDeviceFlow();
+      setDeviceAuth(result);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Unknown error'
-      showToast('Failed to start Copilot setup: ' + msg, 'error')
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      showToast("Failed to start Copilot setup: " + msg, "error");
     } finally {
-      setStarting(false)
+      setStarting(false);
     }
   }
 
-  function handleComplete() {
-    setDeviceAuth(null)
-    showToast('GitHub Copilot connected successfully', 'success')
-    loadStatus()
+  function handleComplete(message?: string) {
+    setDeviceAuth(null);
+    const text = message || "GitHub Copilot connected successfully";
+    const isPartial = text.includes("not available");
+    showToast(text, isPartial ? "error" : "success");
+    loadStatus();
   }
 
   function handleError(message: string) {
-    showToast(message, 'error')
-    setDeviceAuth(null)
+    showToast(message, "error");
+    setDeviceAuth(null);
   }
 
   async function handleDisconnect() {
     try {
-      await disconnectCopilot()
-      showToast('GitHub Copilot disconnected', 'success')
-      loadStatus()
+      await disconnectCopilot();
+      showToast("GitHub Copilot disconnected", "success");
+      loadStatus();
     } catch (err) {
       showToast(
-        'Failed to disconnect: ' + (err instanceof Error ? err.message : 'Unknown error'),
-        'error',
-      )
+        "Failed to disconnect: " +
+          (err instanceof Error ? err.message : "Unknown error"),
+        "error",
+      );
     }
   }
 
   if (loading) {
-    return <div className="skeleton skeleton-block" role="status" aria-label="Loading Copilot status" />
+    return (
+      <div
+        className="skeleton skeleton-block"
+        role="status"
+        aria-label="Loading Copilot status"
+      />
+    );
   }
 
   if (deviceAuth) {
     return (
       <div className="card">
         <div className="card-header">
-          <span className="card-title">{'> '}Copilot Setup</span>
+          <span className="card-title">{"> "}Copilot Setup</span>
         </div>
         <DeviceCodeDisplay
           userCode={deviceAuth.user_code}
@@ -77,22 +97,23 @@ export function CopilotSetup() {
           onCancel={() => setDeviceAuth(null)}
         />
       </div>
-    )
+    );
   }
 
   return (
     <div className="card">
       <div className="card-header">
-        <span className="card-title">{'> '}GitHub Copilot</span>
-        {status?.connected && !status.expired && (
+        <span className="card-title">{"> "}GitHub Copilot</span>
+        {status?.connected && status.has_copilot_token && !status.expired && (
           <span className="tag-ok">CONNECTED</span>
         )}
-        {status?.connected && status.expired && (
+        {status?.connected && status.has_copilot_token && status.expired && (
           <span className="tag-warn">EXPIRED</span>
         )}
-        {!status?.connected && (
-          <span className="tag-err">NOT CONNECTED</span>
+        {status?.connected && !status.has_copilot_token && (
+          <span className="tag-warn">NO COPILOT ACCESS</span>
         )}
+        {!status?.connected && <span className="tag-err">NOT CONNECTED</span>}
       </div>
       {status?.connected && status.github_username && (
         <div className="copilot-info">
@@ -109,7 +130,7 @@ export function CopilotSetup() {
           onClick={handleStart}
           disabled={starting}
         >
-          {status?.connected ? '$ reconnect' : '$ connect github'}
+          {status?.connected ? "$ reconnect" : "$ connect github"}
         </button>
         {status?.connected && (
           <button
@@ -122,5 +143,5 @@ export function CopilotSetup() {
         )}
       </div>
     </div>
-  )
+  );
 }

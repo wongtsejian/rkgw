@@ -431,6 +431,7 @@ export interface CopilotStatus {
   connected: boolean;
   github_username: string | null;
   copilot_plan: string | null;
+  has_copilot_token: boolean;
   expired: boolean;
 }
 

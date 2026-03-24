@@ -1,15 +1,15 @@
-import { useState, useEffect, useRef } from 'react'
-import type { DevicePollResponse } from '../lib/api'
+import { useState, useEffect, useRef } from "react";
+import type { DevicePollResponse } from "../lib/api";
 
 interface DeviceCodeDisplayProps {
-  userCode: string
-  verificationUri: string
-  verificationUriComplete: string
-  deviceCode: string
-  pollFn: (deviceCode: string) => Promise<DevicePollResponse>
-  onComplete: () => void
-  onError: (message: string) => void
-  onCancel: () => void
+  userCode: string;
+  verificationUri: string;
+  verificationUriComplete: string;
+  deviceCode: string;
+  pollFn: (deviceCode: string) => Promise<DevicePollResponse>;
+  onComplete: (message?: string) => void;
+  onError: (message: string) => void;
+  onCancel: () => void;
 }
 
 export function DeviceCodeDisplay({
@@ -22,60 +22,64 @@ export function DeviceCodeDisplay({
   onError,
   onCancel,
 }: DeviceCodeDisplayProps) {
-  const [copied, setCopied] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const intervalRef = useRef(5)
-  const mountedRef = useRef(true)
-  const callbacksRef = useRef({ pollFn, onComplete, onError })
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const intervalRef = useRef(5);
+  const mountedRef = useRef(true);
+  const callbacksRef = useRef({ pollFn, onComplete, onError });
 
   useEffect(() => {
-    callbacksRef.current = { pollFn, onComplete, onError }
-  })
+    callbacksRef.current = { pollFn, onComplete, onError };
+  });
 
   function stopPolling() {
-    if (timerRef.current) clearTimeout(timerRef.current)
+    if (timerRef.current) clearTimeout(timerRef.current);
   }
 
   useEffect(() => {
-    mountedRef.current = true
+    mountedRef.current = true;
 
     function schedulePoll() {
       timerRef.current = setTimeout(async () => {
-        if (!mountedRef.current) return
-        const { pollFn: fn, onComplete: done, onError: fail } = callbacksRef.current
+        if (!mountedRef.current) return;
+        const {
+          pollFn: fn,
+          onComplete: done,
+          onError: fail,
+        } = callbacksRef.current;
         try {
-          const result = await fn(deviceCode)
-          if (!mountedRef.current) return
-          if (result.status === 'success') {
-            done()
-          } else if (result.status === 'expired') {
-            fail(result.message || 'Device code expired. Please try again.')
-          } else if (result.status === 'denied') {
-            fail(result.message || 'Authorization was denied.')
+          const result = await fn(deviceCode);
+          if (!mountedRef.current) return;
+          if (result.status === "success") {
+            done(result.message);
+          } else if (result.status === "expired") {
+            fail(result.message || "Device code expired. Please try again.");
+          } else if (result.status === "denied") {
+            fail(result.message || "Authorization was denied.");
           } else {
-            if (result.status === 'slow_down') intervalRef.current = 10
-            schedulePoll()
+            if (result.status === "slow_down") intervalRef.current = 10;
+            schedulePoll();
           }
         } catch (err) {
-          if (!mountedRef.current) return
-          fail(err instanceof Error ? err.message : 'Polling failed')
+          if (!mountedRef.current) return;
+          fail(err instanceof Error ? err.message : "Polling failed");
         }
-      }, intervalRef.current * 1000)
+      }, intervalRef.current * 1000);
     }
 
-    schedulePoll()
+    schedulePoll();
 
     return () => {
-      mountedRef.current = false
-      if (timerRef.current) clearTimeout(timerRef.current)
-    }
-  }, [deviceCode])
+      mountedRef.current = false;
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [deviceCode]);
 
   async function copyCode() {
     try {
-      await navigator.clipboard.writeText(userCode)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
+      await navigator.clipboard.writeText(userCode);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       // Fallback: ignore
     }
@@ -93,7 +97,7 @@ export function DeviceCodeDisplay({
       >
         <div className="device-code-value">{userCode}</div>
         <div className="device-code-copy">
-          {copied ? '[copied]' : '[click to copy]'}
+          {copied ? "[copied]" : "[click to copy]"}
         </div>
       </button>
 
@@ -114,11 +118,14 @@ export function DeviceCodeDisplay({
 
       <button
         type="button"
-        onClick={() => { stopPolling(); onCancel() }}
+        onClick={() => {
+          stopPolling();
+          onCancel();
+        }}
         className="device-code-cancel"
       >
         $ cancel
       </button>
     </div>
-  )
+  );
 }

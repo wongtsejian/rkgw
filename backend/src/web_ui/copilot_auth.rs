@@ -61,6 +61,7 @@ pub struct CopilotStatusResponse {
     pub connected: bool,
     pub github_username: Option<String>,
     pub copilot_plan: Option<String>,
+    pub has_copilot_token: bool,
     pub expired: bool,
 }
 
@@ -426,12 +427,14 @@ async fn copilot_status(
 
     match row {
         Some(r) => {
-            let expired = r.expires_at.map(|exp| exp < Utc::now()).unwrap_or(true);
+            let has_copilot_token = r.copilot_token.is_some();
+            let expired = r.expires_at.map(|exp| exp < Utc::now()).unwrap_or(false);
 
             Ok(Json(CopilotStatusResponse {
                 connected: true,
                 github_username: r.github_username,
                 copilot_plan: r.copilot_plan,
+                has_copilot_token,
                 expired,
             }))
         }
@@ -439,6 +442,7 @@ async fn copilot_status(
             connected: false,
             github_username: None,
             copilot_plan: None,
+            has_copilot_token: false,
             expired: false,
         })),
     }
@@ -703,12 +707,14 @@ mod tests {
             connected: true,
             github_username: Some("octocat".to_string()),
             copilot_plan: Some("individual".to_string()),
+            has_copilot_token: true,
             expired: false,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert!(json["connected"].as_bool().unwrap());
         assert_eq!(json["github_username"], "octocat");
         assert_eq!(json["copilot_plan"], "individual");
+        assert!(json["has_copilot_token"].as_bool().unwrap());
         assert!(!json["expired"].as_bool().unwrap());
     }
 
@@ -718,10 +724,12 @@ mod tests {
             connected: false,
             github_username: None,
             copilot_plan: None,
+            has_copilot_token: false,
             expired: false,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert!(!json["connected"].as_bool().unwrap());
+        assert!(!json["has_copilot_token"].as_bool().unwrap());
         assert!(json["github_username"].is_null());
         assert!(json["copilot_plan"].is_null());
     }
@@ -779,10 +787,12 @@ mod tests {
             connected: true,
             github_username: Some("octocat".to_string()),
             copilot_plan: Some("individual".to_string()),
+            has_copilot_token: true,
             expired: true,
         };
         let json = serde_json::to_value(&resp).unwrap();
         assert!(json["expired"].as_bool().unwrap());
+        assert!(json["has_copilot_token"].as_bool().unwrap());
         assert!(json["connected"].as_bool().unwrap());
     }
 
