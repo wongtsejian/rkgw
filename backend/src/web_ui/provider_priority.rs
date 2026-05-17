@@ -207,8 +207,8 @@ mod tests {
 
     #[test]
     fn test_all_visible_providers_count() {
-        // Ensure we have exactly 4 visible providers (kiro, anthropic, openai_codex, copilot)
-        assert_eq!(ProviderId::all_visible().len(), 4);
+        // Ensure we have exactly 5 visible providers (kiro, anthropic, openai_codex, copilot, huawei_maas)
+        assert_eq!(ProviderId::all_visible().len(), 5);
     }
 
     #[test]

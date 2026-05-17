@@ -192,6 +192,7 @@ pub fn anthropic_to_openai(req: &AnthropicMessagesRequest) -> ChatCompletionRequ
                         name: ct.name.clone(),
                         description: ct.description.clone(),
                         parameters: Some(ct.input_schema.clone()),
+                        strict: None,
                     },
                 })),
                 AnthropicTool::ServerSide(_) => None,

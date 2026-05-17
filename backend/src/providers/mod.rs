@@ -10,6 +10,7 @@ use crate::providers::types::ProviderId;
 
 pub mod anthropic;
 pub mod copilot;
+pub mod huawei_maas;
 pub mod kiro;
 pub mod openai_codex;
 pub mod rate_limiter;
@@ -87,6 +88,13 @@ pub fn build_provider_map(
     map.insert(
         ProviderId::Copilot,
         Arc::new(copilot::CopilotProvider::new(
+            shared_request_client.clone(),
+            shared_streaming_client.clone(),
+        )) as Arc<dyn Provider>,
+    );
+    map.insert(
+        ProviderId::HuaweiMaas,
+        Arc::new(huawei_maas::HuaweiMaasProvider::new(
             shared_request_client,
             shared_streaming_client,
         )) as Arc<dyn Provider>,

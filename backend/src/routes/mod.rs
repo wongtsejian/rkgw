@@ -1,6 +1,7 @@
 mod anthropic;
 mod openai;
 pub mod pipeline;
+mod responses;
 pub mod state;
 
 pub use state::{AppState, OAuthPendingState, SessionInfo, UserKiroCreds, PROXY_USER_ID};
@@ -33,6 +34,7 @@ pub fn openai_routes(state: AppState) -> Router {
             "/v1/chat/completions",
             post(openai::chat_completions_handler),
         )
+        .route("/v1/responses", post(responses::responses_handler))
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             middleware::auth_middleware,

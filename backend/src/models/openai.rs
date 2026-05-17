@@ -82,6 +82,8 @@ pub struct ToolFunction {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parameters: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strict: Option<bool>,
 }
 
 /// OpenAI tool definition — either a function tool or a server-side tool.

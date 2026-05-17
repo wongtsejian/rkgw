@@ -514,6 +514,7 @@ mod tests {
                     },
                     "required": ["location"]
                 })),
+                strict: None,
             },
         })];
         let tokens = count_tools_tokens(Some(&tools), false);
@@ -535,6 +536,7 @@ mod tests {
                         "limit": {"type": "integer"}
                     }
                 })),
+                strict: None,
             },
         })];
         let without_correction = count_tools_tokens(Some(&tools), false);
@@ -551,6 +553,7 @@ mod tests {
                     name: "tool_one".to_string(),
                     description: Some("First tool".to_string()),
                     parameters: None,
+                    strict: None,
                 },
             }),
             Tool::Function(FunctionTool {
@@ -559,6 +562,7 @@ mod tests {
                     name: "tool_two".to_string(),
                     description: Some("Second tool".to_string()),
                     parameters: None,
+                    strict: None,
                 },
             }),
         ];
