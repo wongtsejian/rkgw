@@ -38,7 +38,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             }
           </span>
         </h1>
-        <div className="version">v1.0.8</div>
+        <div className="version">v1.1.0</div>
       </div>
       <div className="sidebar-nav">
         <NavLink

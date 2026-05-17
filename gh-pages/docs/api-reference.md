@@ -510,6 +510,177 @@ for await (const event of stream) {
 
 ---
 
+### POST /v1/responses
+
+OpenAI Responses API endpoint. Accepts requests in the [OpenAI Responses API format](https://platform.openai.com/docs/api-reference/responses) (used by Codex CLI and OpenAI Agents SDK) and converts them internally to Chat Completions format for the upstream provider. Supports both streaming and non-streaming responses. Requires API key authentication.
+
+#### Request Body
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `model` | string | Yes | Model name or alias (e.g. `claude-sonnet-4`, `huawei_maas/deepseek-v3`). The gateway resolves aliases and provider prefixes automatically. |
+| `input` | string or array | Yes | User input. Can be a string or array of input items (messages, function call outputs). |
+| `instructions` | string | No | System-level instructions. Mapped to the system message in Chat Completions format. |
+| `stream` | boolean | No | Whether to stream the response via SSE. Default: `false`. |
+| `temperature` | float | No | Sampling temperature (0.0–2.0). |
+| `top_p` | float | No | Nucleus sampling parameter. |
+| `max_output_tokens` | integer | No | Maximum tokens to generate. Mapped to `max_tokens` in Chat Completions format. |
+| `tools` | array | No | Tool definitions. Flat format is converted to nested `function` tools automatically. |
+| `tool_choice` | string or object | No | How the model should use tools (`auto`, `none`, `required`, or specific tool). |
+| `parallel_tool_calls` | boolean | No | Whether to allow parallel tool calls. Default: `true`. |
+| `reasoning` | object | No | Reasoning configuration. `reasoning.effort` is mapped to `reasoning_effort` in Chat Completions format. |
+| `text` | object | No | Text output configuration. `text.format` is mapped to `response_format` in Chat Completions format. |
+| `metadata` | object | No | Request metadata (accepted but not forwarded). |
+| `previous_response_id` | string | No | ID of a previous response to continue from (accepted for compatibility). |
+| `store` | boolean | No | Whether to store the response (accepted for compatibility, not forwarded). |
+| `truncation` | string or object | No | Truncation strategy (accepted for compatibility). |
+| `user` | string | No | Accepted for compatibility, not forwarded. |
+
+#### Non-Streaming Response
+
+```json
+{
+  "id": "resp_abc123",
+  "object": "response",
+  "created_at": 1709000000,
+  "status": "completed",
+  "model": "claude-sonnet-4-20250514",
+  "output": [
+    {
+      "type": "message",
+      "id": "msg_abc123",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "The capital of France is Paris.",
+          "logprobs": []
+        }
+      ]
+    }
+  ],
+  "usage": {
+    "input_tokens": 25,
+    "output_tokens": 12,
+    "total_tokens": 37
+  }
+}
+```
+
+#### Output Item Types
+
+| Type | Description |
+|------|-------------|
+| `message` | Assistant message with text content. Contains `role` and `content` array. |
+| `function_call` | Tool function call. Contains `name`, `call_id`, and `arguments`. |
+| `reasoning` | Reasoning/thinking output (for models that support extended thinking). |
+
+#### Streaming Response
+
+When `stream: true`, the response is delivered as SSE events:
+
+```
+event: response.created
+data: {"type":"response.created","response":{"id":"resp_abc123","object":"response","status":"in_progress",...}}
+
+event: response.in_progress
+data: {"type":"response.in_progress","response":{"id":"resp_abc123","status":"in_progress",...}}
+
+event: response.output_item.added
+data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","role":"assistant","content":[]}}
+
+event: response.content_part.added
+data: {"type":"response.content_part.added","output_index":0,"content_index":0,"part":{"type":"output_text","text":""}}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"The capital"}
+
+event: response.output_text.delta
+data: {"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":" of France is Paris."}
+
+event: response.content_part.done
+data: {"type":"response.content_part.done","output_index":0,"content_index":0,"part":{"type":"output_text","text":"The capital of France is Paris."}}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done","output_index":0,"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"The capital of France is Paris."}]}}
+
+event: response.completed
+data: {"type":"response.completed","response":{"id":"resp_abc123","status":"completed",...}}
+```
+
+Function call arguments stream as `response.function_call_arguments.delta` events.
+
+#### Streaming Event Types
+
+| Event | Description |
+|-------|-------------|
+| `response.created` | Response object created, status `in_progress`. |
+| `response.in_progress` | Response processing has begun. |
+| `response.output_item.added` | A new output item (message, function call) has been added. |
+| `response.content_part.added` | A new content part within an output item has been added. |
+| `response.output_text.delta` | Incremental text content delta. |
+| `response.function_call_arguments.delta` | Incremental function call arguments delta. |
+| `response.content_part.done` | A content part is complete. |
+| `response.output_item.done` | An output item is complete. |
+| `response.completed` | Response is fully complete with final usage. |
+
+#### Examples
+
+**curl (non-streaming):**
+
+```bash
+curl -X POST https://your-domain/v1/responses \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4",
+    "input": "What is the capital of France?"
+  }'
+```
+
+**curl (streaming):**
+
+```bash
+curl -X POST https://your-domain/v1/responses \
+  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "claude-sonnet-4",
+    "input": "What is the capital of France?",
+    "stream": true
+  }'
+```
+
+**Python (with instructions and Huawei MaaS model):**
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://your-domain/v1",
+    api_key="YOUR_API_KEY",
+)
+
+response = client.responses.create(
+    model="huawei_maas/deepseek-v3",
+    input="What is the capital of France?",
+    instructions="You are a helpful geography assistant.",
+    max_output_tokens=1024,
+)
+print(response.output[0].content[0].text)
+```
+
+**Codex CLI:**
+
+```bash
+# Set environment variables and run codex
+export OPENAI_BASE_URL=https://your-domain/v1
+export OPENAI_API_KEY=YOUR_API_KEY
+codex
+```
+
+---
+
 ### GET /v1/models
 
 List all available models. Returns models in OpenAI-compatible format. Requires API key authentication.
@@ -576,7 +747,7 @@ Health check endpoint. Does not require authentication — designed for load bal
 {
   "status": "healthy",
   "timestamp": "2025-03-01T12:00:00.000Z",
-  "version": "1.0.8"
+  "version": "1.1.0"
 }
 ```
 
@@ -596,7 +767,7 @@ Root endpoint. Returns a simple status check. No authentication required.
 {
   "status": "ok",
   "message": "Kiro Gateway is running",
-  "version": "1.0.8"
+  "version": "1.1.0"
 }
 ```
 
@@ -716,6 +887,17 @@ The gateway includes a model resolver that maps common model aliases to canonica
 - Canonical Kiro model IDs (e.g. `claude-sonnet-4-20250514`)
 - Short aliases (e.g. `claude-sonnet-4.5`, `claude-haiku-4`)
 - OpenAI-style names (e.g. `claude-3-5-sonnet`)
+- Provider-prefixed names (e.g. `anthropic/`, `openai_codex/`, `copilot/`, `huawei_maas/`, `custom/`)
+
+Provider prefixes route the request to a specific provider, bypassing the Kiro pipeline:
+
+| Prefix | Provider | Example |
+|--------|----------|---------|
+| `anthropic/` | Anthropic API directly | `anthropic/claude-opus-4-6` |
+| `openai_codex/` | OpenAI Codex | `openai_codex/gpt-4` |
+| `copilot/` | GitHub Copilot | `copilot/gpt-4` |
+| `huawei_maas/` | Huawei MaaS (ModelArts) | `huawei_maas/deepseek-v3` |
+| `custom/` | Custom OpenAI-compatible endpoint | `custom/my-model` |
 
 The resolver checks the model cache (populated at startup from the Kiro API) and falls back to best-effort matching. Use `GET /v1/models` to see all available model IDs.
 

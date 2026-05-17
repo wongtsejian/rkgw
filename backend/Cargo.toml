@@ -1,6 +1,6 @@
 [package]
 name = "harbangan"
-version = "1.0.8"
+version = "1.1.0"
 edition = "2021"
 authors = ["Jwadow"]
 license = "AGPL-3.0"
@@ -118,4 +118,3 @@ path = "src/bin/probe_limits.rs"
 name = "integration_test"
 path = "tests/integration_test.rs"
 required-features = ["test-utils"]
-

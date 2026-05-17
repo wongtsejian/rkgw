@@ -88,7 +88,7 @@ export function Layout() {
         </div>
         <div className="top-bar-info">
           <span>up {formatUptime(uptime)}</span>
-          <span>v1.0.8</span>
+          <span>v1.1.0</span>
         </div>
       </header>
       <main className="main" id="main-content">

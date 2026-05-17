@@ -150,7 +150,7 @@ When the probe can't determine the output cap empirically, use Anthropic's docum
 
 ### Summary
 
-As of v1.0.8, the gateway supports multiple AI providers beyond the original Kiro (AWS CodeWhisperer) backend. Each user can connect credentials for multiple providers and set a priority order for fallback.
+As of v1.1.0, the gateway supports multiple AI providers beyond the original Kiro (AWS CodeWhisperer) backend. Each user can connect credentials for multiple providers and set a priority order for fallback.
 
 ### Supported Providers
 

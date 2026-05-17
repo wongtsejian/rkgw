@@ -26,7 +26,7 @@ Your configuration depends on your deployment mode:
 |---|---|---|
 | **API Key** | `PROXY_API_KEY` from `.env.proxy` | Personal key from Web UI (`/_ui/`) |
 | **Providers** | All providers via env vars | All providers via Web UI OAuth + Admin UI |
-| **Models** | `claude-*` names, `auto`, provider-prefixed | + `anthropic/`, `openai_codex/`, `copilot/` prefixes |
+| **Models** | `claude-*` names, `auto`, provider-prefixed | + `anthropic/`, `openai_codex/`, `copilot/`, `huawei_maas/` prefixes |
 | **Web UI** | Not available | Available at `/_ui/` for OAuth setup |
 
 ---
@@ -254,6 +254,39 @@ print(message.content[0].text)
 
 ---
 
+## Codex CLI (OpenAI Responses API)
+
+The OpenAI Codex CLI uses the [Responses API](https://platform.openai.com/docs/api-reference/responses) (`/v1/responses`), which the gateway supports by converting to and from Chat Completions format internally.
+
+### One-liner
+
+```bash
+OPENAI_BASE_URL=https://gateway.example.com/v1 \
+OPENAI_API_KEY=YOUR_API_KEY \
+codex
+```
+
+### Shell profile (persistent)
+
+Add the following to your `~/.bashrc`, `~/.zshrc`, or equivalent:
+
+```bash
+export OPENAI_BASE_URL=https://gateway.example.com/v1
+export OPENAI_API_KEY=YOUR_API_KEY
+```
+
+### Environment variables
+
+| Variable | Value | Purpose |
+|:---------|:------|:--------|
+| `OPENAI_BASE_URL` | `https://gateway.example.com/v1` | Points Codex CLI at your gateway |
+| `OPENAI_API_KEY` | `YOUR_API_KEY` | API key from the Web UI or `PROXY_API_KEY` |
+
+{: .note }
+Replace `gateway.example.com` with your actual domain. The Codex CLI automatically uses the `/v1/responses` endpoint when `OPENAI_BASE_URL` is set. The gateway converts Responses API requests to Chat Completions format and routes them to the appropriate provider.
+
+---
+
 ## Model Naming
 
 ### Kiro pipeline (default)
@@ -267,7 +300,7 @@ Use Claude model names directly. The gateway normalizes variants automatically:
 | `claude-haiku-4-5-latest` | `claude-haiku-4.5` |
 | `auto` | Gateway picks the best available model |
 
-### Direct providers (full deployment only)
+### Direct providers
 
 Prefix with the provider name to bypass Kiro and route to a direct API:
 
@@ -276,8 +309,13 @@ Prefix with the provider name to bypass Kiro and route to a direct API:
 | `anthropic/claude-opus-4-6` | Anthropic API directly |
 | `openai_codex/gpt-4` | OpenAI Codex |
 | `copilot/gpt-4` | GitHub Copilot |
+| `huawei_maas/deepseek-v3` | Huawei MaaS (ModelArts) |
+| `huawei_maas/deepseek-r1` | Huawei MaaS (ModelArts) |
 
 Direct providers require per-user OAuth tokens configured in the Web UI **Providers** page. Without OAuth tokens, requests fall back to Kiro automatically.
+
+{: .note }
+Huawei MaaS is also available in **proxy-only mode** via environment variables (`HUAWEI_MAAS_ENABLED`, `HUAWEI_MAAS_ACCESS_TOKEN`, `HUAWEI_MAAS_BASE_URL`). See [Configuration](configuration.html) for details.
 
 ---
 
