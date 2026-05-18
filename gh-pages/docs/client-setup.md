@@ -309,8 +309,8 @@ Prefix with the provider name to bypass Kiro and route to a direct API:
 | `anthropic/claude-opus-4-6` | Anthropic API directly |
 | `openai_codex/gpt-4` | OpenAI Codex |
 | `copilot/gpt-4` | GitHub Copilot |
-| `huawei_maas/deepseek-v3` | Huawei MaaS (ModelArts) |
-| `huawei_maas/deepseek-r1` | Huawei MaaS (ModelArts) |
+| `huawei_maas/deepseek-v4-flash` | Huawei MaaS (ModelArts) |
+| `huawei_maas/glm-5` | Huawei MaaS (ModelArts) |
 
 Direct providers require per-user OAuth tokens configured in the Web UI **Providers** page. Without OAuth tokens, requests fall back to Kiro automatically.
 

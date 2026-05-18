@@ -57,7 +57,7 @@ Requires per-user OAuth tokens configured in the Web UI. Use the `provider/model
 | Anthropic | `anthropic/` | Claude family (direct API, bypasses Kiro) |
 | OpenAI Codex | `openai_codex/` | `gpt-4`, `o1-*`, `o3-*`, `o4-*`, `chatgpt-*` |
 | GitHub Copilot | `copilot/` | Copilot models |
-| Huawei MaaS | `huawei_maas/` | `deepseek-v3`, `deepseek-r1`, other ModelArts models |
+| Huawei MaaS | `huawei_maas/` | `deepseek-v4-pro`, `deepseek-v4-flash`, `glm-5.1`, `glm-5` |
 | Custom | `custom/` | Any OpenAI-compatible endpoint |
 
 > Direct providers bypass Kiro entirely and require full deployment with PostgreSQL. See [Client Setup](https://if414013.github.io/harbangan/docs/client-setup) for configuration details.

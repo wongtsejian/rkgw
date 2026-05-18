@@ -62,6 +62,68 @@ fn map_chat_usage_to_responses(usage: &Value) -> Value {
 }
 
 // ==================================================================================================
+// Content part conversion: Responses API → Chat Completions
+// ==================================================================================================
+
+/// Convert Responses API content parts to Chat Completions content parts.
+///
+/// The Responses API uses different content part types than Chat Completions:
+/// - `input_text` → `text`
+/// - `input_image` → `image_url` (with structural change: string → object)
+///
+/// If content is a string, it passes through unchanged.
+/// If content is an array, each part is converted.
+/// If content is anything else (null, object, number), it passes through unchanged.
+fn convert_responses_content_parts(content: &Value) -> Value {
+    match content {
+        // String content — pass through as-is.
+        Value::String(_) => content.clone(),
+        // Array of content parts — convert each part.
+        Value::Array(parts) => Value::Array(
+            parts
+                .iter()
+                .map(|part| convert_single_content_part(part))
+                .collect(),
+        ),
+        // Everything else (null, object, number, bool) — pass through.
+        _ => content.clone(),
+    }
+}
+
+/// Convert a single content part from Responses API format to Chat Completions format.
+fn convert_single_content_part(part: &Value) -> Value {
+    let part_type = part.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+    match part_type {
+        // input_text → text
+        "input_text" => {
+            let text = part.get("text").and_then(|v| v.as_str()).unwrap_or("");
+            json!({
+                "type": "text",
+                "text": text
+            })
+        }
+        // input_image → image_url
+        // Responses API: {"type": "input_image", "image_url": "data:..."}
+        // Chat Completions: {"type": "image_url", "image_url": {"url": "data:..."}}
+        "input_image" => {
+            let url = part.get("image_url").and_then(|v| v.as_str()).unwrap_or("");
+            let detail = part.get("detail").and_then(|v| v.as_str());
+            let mut image_url_obj = json!({ "url": url });
+            if let Some(d) = detail {
+                image_url_obj["detail"] = json!(d);
+            }
+            json!({
+                "type": "image_url",
+                "image_url": image_url_obj
+            })
+        }
+        // Already in Chat Completions format or unknown type — pass through.
+        _ => part.clone(),
+    }
+}
+
+// ==================================================================================================
 // Request conversion: Responses API → Chat Completions
 // ==================================================================================================
 
@@ -174,9 +236,14 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                 };
                 let content = item.get("content").cloned().unwrap_or(Value::Null);
 
+                // Convert Responses API content parts to Chat Completions format.
+                // Responses API uses: input_text, input_image
+                // Chat Completions uses: text, image_url
+                let converted_content = convert_responses_content_parts(&content);
+
                 messages.push(ChatMessage {
                     role: mapped_role.to_string(),
-                    content: Some(content),
+                    content: Some(converted_content),
                     name: None,
                     tool_calls: None,
                     tool_call_id: None,
@@ -2667,6 +2734,78 @@ mod tests {
     }
 
     // ---- Edge-case tests (M5) ----
+
+    // ---- Content part conversion tests (multimodal) ----
+
+    #[test]
+    fn test_input_text_converted_to_text() {
+        let input = ResponsesApiInput::Items(vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": "Describe this"},
+                {"type": "input_image", "image_url": "data:image/png;base64,iVBOR"}
+            ]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 1);
+        let content = out.messages[0].content.as_ref().unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        // input_text → text
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "Describe this");
+        // input_image → image_url
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,iVBOR");
+    }
+
+    #[test]
+    fn test_input_image_with_detail() {
+        let input = ResponsesApiInput::Items(vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "input_image", "image_url": "https://example.com/img.png", "detail": "high"}
+            ]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        let content = out.messages[0].content.as_ref().unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts[0]["type"], "image_url");
+        assert_eq!(parts[0]["image_url"]["url"], "https://example.com/img.png");
+        assert_eq!(parts[0]["image_url"]["detail"], "high");
+    }
+
+    #[test]
+    fn test_string_content_passthrough() {
+        // String content should pass through unchanged (not an array of parts).
+        let input = ResponsesApiInput::Items(vec![json!({
+            "role": "user",
+            "content": "Just a plain string"
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages[0].content, Some(json!("Just a plain string")));
+    }
+
+    #[test]
+    fn test_already_chat_completions_format_passthrough() {
+        // Content parts already in Chat Completions format should pass through.
+        let input = ResponsesApiInput::Items(vec![json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Hello"},
+                {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
+            ]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        let content = out.messages[0].content.as_ref().unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[1]["type"], "image_url");
+    }
 
     /// 1. Empty input array `{"input": []}` — should produce zero user messages
     ///    (only instructions if present).

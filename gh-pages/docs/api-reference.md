@@ -518,7 +518,7 @@ OpenAI Responses API endpoint. Accepts requests in the [OpenAI Responses API for
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `model` | string | Yes | Model name or alias (e.g. `claude-sonnet-4`, `huawei_maas/deepseek-v3`). The gateway resolves aliases and provider prefixes automatically. |
+| `model` | string | Yes | Model name or alias (e.g. `claude-sonnet-4`, `huawei_maas/deepseek-v4-flash`). The gateway resolves aliases and provider prefixes automatically. |
 | `input` | string or array | Yes | User input. Can be a string or array of input items (messages, function call outputs). |
 | `instructions` | string | No | System-level instructions. Mapped to the system message in Chat Completions format. |
 | `stream` | boolean | No | Whether to stream the response via SSE. Default: `false`. |
@@ -662,7 +662,7 @@ client = OpenAI(
 )
 
 response = client.responses.create(
-    model="huawei_maas/deepseek-v3",
+    model="huawei_maas/deepseek-v4-flash",
     input="What is the capital of France?",
     instructions="You are a helpful geography assistant.",
     max_output_tokens=1024,
@@ -896,7 +896,7 @@ Provider prefixes route the request to a specific provider, bypassing the Kiro p
 | `anthropic/` | Anthropic API directly | `anthropic/claude-opus-4-6` |
 | `openai_codex/` | OpenAI Codex | `openai_codex/gpt-4` |
 | `copilot/` | GitHub Copilot | `copilot/gpt-4` |
-| `huawei_maas/` | Huawei MaaS (ModelArts) | `huawei_maas/deepseek-v3` |
+| `huawei_maas/` | Huawei MaaS (ModelArts) | `huawei_maas/deepseek-v4-flash` |
 | `custom/` | Custom OpenAI-compatible endpoint | `custom/my-model` |
 
 The resolver checks the model cache (populated at startup from the Kiro API) and falls back to best-effort matching. Use `GET /v1/models` to see all available model IDs.
