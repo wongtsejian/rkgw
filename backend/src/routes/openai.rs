@@ -12,11 +12,10 @@ use crate::models::openai::{ChatCompletionRequest, ModelList, OpenAIModel};
 use crate::providers::types::{ProviderContext, ProviderId};
 
 use super::pipeline::{
-    build_kiro_credentials, build_request_context_openai, extract_assistant_content,
-    extract_last_user_message, extract_usage_metric_snapshot, handle_rate_limit_retry,
-    persist_non_streaming_usage, read_config, resolve_provider_routing, run_input_guardrail_check,
-    run_output_guardrail_check, update_rate_limits, validate_model_provider,
-    validate_model_visibility, validate_provider_enabled, wrap_stream_with_usage_metrics,
+    build_request_context_openai, extract_assistant_content, extract_last_user_message,
+    extract_usage_metric_snapshot, handle_rate_limit_retry, persist_non_streaming_usage,
+    read_config, resolve_provider, run_input_guardrail_check, run_output_guardrail_check,
+    update_rate_limits, wrap_stream_with_usage_metrics,
 };
 use super::state::{AppState, UserKiroCreds};
 
@@ -101,28 +100,9 @@ pub(crate) async fn chat_completions_handler(
 
     // ── Provider routing ─────────────────────────────────────────────
     let requested_model = request.model.clone();
-    validate_model_provider(&requested_model)?;
-    validate_provider_enabled(&state.provider_registry, &requested_model).await?;
-    let mut routing = resolve_provider_routing(&state, user_creds.as_ref(), &requested_model).await;
-    validate_model_visibility(
-        &state.model_cache,
-        &routing.provider_id,
-        &requested_model,
-        routing.stripped_model.as_deref(),
-    )?;
-
-    // Build credentials: for Kiro, derive from user creds / global auth;
-    // for direct providers, use the credentials from the registry.
-    let mut creds = if routing.provider_id == ProviderId::Kiro {
-        build_kiro_credentials(&state, user_creds.as_ref()).await?
-    } else {
-        routing.provider_creds.clone().ok_or_else(|| {
-            ApiError::AuthError(format!(
-                "No credentials available for provider {:?}",
-                routing.provider_id
-            ))
-        })?
-    };
+    let resolved = resolve_provider(&state, user_creds.as_ref(), &requested_model).await?;
+    let mut routing = resolved.routing;
+    let mut creds = resolved.credentials;
 
     // Strip provider prefix from model name if present
     if let Some(ref model_id) = routing.stripped_model {
