@@ -354,9 +354,10 @@ const MAX_INPUT_ITEMS: usize = 1000;
 fn validate_input_item_count(input: &ResponsesApiInput) -> Result<(), ApiError> {
     if let ResponsesApiInput::Items(ref items) = input {
         if items.len() > MAX_INPUT_ITEMS {
-            return Err(ApiError::ValidationError(
-                format!("Too many input items in request (max {})", MAX_INPUT_ITEMS),
-            ));
+            return Err(ApiError::ValidationError(format!(
+                "Too many input items in request (max {})",
+                MAX_INPUT_ITEMS
+            )));
         }
     }
     Ok(())

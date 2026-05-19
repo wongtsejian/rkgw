@@ -630,7 +630,7 @@ Function call arguments stream as `response.function_call_arguments.delta` event
 
 ```bash
 curl -X POST https://your-domain/v1/responses \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-sonnet-4",
@@ -642,7 +642,7 @@ curl -X POST https://your-domain/v1/responses \
 
 ```bash
 curl -X POST https://your-domain/v1/responses \
-  -H "Authorization: Bearer YOUR_API_KEY" \
+  -H "Authorization: Bearer <key>" \
   -H "Content-Type: application/json" \
   -d '{
     "model": "claude-sonnet-4",
