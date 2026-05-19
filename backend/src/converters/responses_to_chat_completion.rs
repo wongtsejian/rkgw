@@ -68,7 +68,7 @@ fn map_chat_usage_to_responses(usage: &Value) -> Value {
 /// Convert Responses API content parts to Chat Completions content parts.
 ///
 /// The Responses API uses different content part types than Chat Completions:
-/// - `input_text` → `text`
+/// - `input_text` / `output_text` → `text`
 /// - `input_image` → `image_url` (with structural change: string → object)
 ///
 /// If content is a string, it passes through unchanged.
@@ -79,12 +79,9 @@ fn convert_responses_content_parts(content: &Value) -> Value {
         // String content — pass through as-is.
         Value::String(_) => content.clone(),
         // Array of content parts — convert each part.
-        Value::Array(parts) => Value::Array(
-            parts
-                .iter()
-                .map(|part| convert_single_content_part(part))
-                .collect(),
-        ),
+        Value::Array(parts) => {
+            Value::Array(parts.iter().map(convert_single_content_part).collect())
+        }
         // Everything else (null, object, number, bool) — pass through.
         _ => content.clone(),
     }
@@ -95,8 +92,8 @@ fn convert_single_content_part(part: &Value) -> Value {
     let part_type = part.get("type").and_then(|v| v.as_str()).unwrap_or("");
 
     match part_type {
-        // input_text → text
-        "input_text" => {
+        // input_text / output_text → text
+        "input_text" | "output_text" => {
             let text = part.get("text").and_then(|v| v.as_str()).unwrap_or("");
             json!({
                 "type": "text",
@@ -239,8 +236,19 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                     tool_call_id: Some(call_id.to_string()),
                 });
             }
+            Some("reasoning") => {
+                tracing::debug!(
+                    item_id = item.get("id").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                    "Skipping reasoning input item when converting Responses API history"
+                );
+            }
             _ => {
-                // Regular message — pass through, mapping developer → system.
+                if let Some(t) = item_type {
+                    tracing::warn!(
+                        item_type = %t,
+                        "Unrecognized Responses API input item type; converting as regular message"
+                    );
+                }
                 let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("user");
                 let mapped_role = match role {
                     "developer" => "system",
@@ -431,7 +439,7 @@ pub fn chat_completion_to_responses_api(
     let choices_empty = chat_resp
         .get("choices")
         .and_then(|c| c.as_array())
-        .map_or(true, |c| c.is_empty());
+        .is_none_or(|c| c.is_empty());
     if choices_empty {
         tracing::warn!(
             chat_id = %chat_id,
@@ -543,9 +551,7 @@ pub fn chat_completion_to_responses_api(
     }
 
     // Build usage object with token details (H2: using shared helper).
-    let usage = chat_resp
-        .get("usage")
-        .map(|u| map_chat_usage_to_responses(u));
+    let usage = chat_resp.get("usage").map(map_chat_usage_to_responses);
 
     // Build the response, echoing back request parameters.
     let mut response = json!({
@@ -2800,6 +2806,220 @@ mod tests {
         // input_image → image_url
         assert_eq!(parts[1]["type"], "image_url");
         assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,iVBOR");
+    }
+
+    #[test]
+    fn test_output_text_converted_to_text_in_followup_history() {
+        let input = ResponsesApiInput::Items(vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {"type": "output_text", "text": "Previous answer", "annotations": []}
+            ]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 1);
+        assert_eq!(out.messages[0].role, "assistant");
+
+        let content = out.messages[0].content.as_ref().unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "Previous answer");
+    }
+
+    #[test]
+    fn test_reasoning_items_skipped_in_followup_history() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({
+                "type": "reasoning",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "Internal reasoning", "annotations": []}
+                ]
+            }),
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "Visible answer", "annotations": []}
+                ]
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 1);
+        assert_eq!(out.messages[0].role, "assistant");
+
+        let content = out.messages[0].content.as_ref().unwrap();
+        let parts = content.as_array().unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "Visible answer");
+    }
+
+    #[test]
+    fn test_output_text_mixed_with_input_text_in_content() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Hello"}
+                ]
+            }),
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {"type": "output_text", "text": "Hi there", "annotations": []}
+                ]
+            }),
+            json!({
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": "Follow up"}
+                ]
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 3);
+
+        let p0 = out.messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(p0[0]["type"], "text");
+        assert_eq!(p0[0]["text"], "Hello");
+
+        let p1 = out.messages[1]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(p1[0]["type"], "text");
+        assert_eq!(p1[0]["text"], "Hi there");
+
+        let p2 = out.messages[2]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(p2[0]["type"], "text");
+        assert_eq!(p2[0]["text"], "Follow up");
+    }
+
+    #[test]
+    fn test_multiple_reasoning_items_all_skipped() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({
+                "type": "reasoning",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "thinking 1", "annotations": []}]
+            }),
+            json!({
+                "type": "reasoning",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "thinking 2", "annotations": []}]
+            }),
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "final answer", "annotations": []}]
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 1);
+        assert_eq!(out.messages[0].role, "assistant");
+        let parts = out.messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(parts[0]["text"], "final answer");
+    }
+
+    #[test]
+    fn test_reasoning_only_input_produces_no_messages() {
+        let input = ResponsesApiInput::Items(vec![json!({
+            "type": "reasoning",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "just thinking", "annotations": []}]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 0);
+    }
+
+    #[test]
+    fn test_full_multiturn_with_reasoning_and_output_text() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({
+                "role": "user",
+                "content": [{"type": "input_text", "text": "What is 2+2?"}]
+            }),
+            json!({
+                "type": "reasoning",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Let me think...", "annotations": []}]
+            }),
+            json!({
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "4", "annotations": []}]
+            }),
+            json!({
+                "role": "user",
+                "content": [{"type": "input_text", "text": "And 3+3?"}]
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        assert_eq!(out.messages.len(), 3);
+        assert_eq!(out.messages[0].role, "user");
+        assert_eq!(out.messages[1].role, "assistant");
+        assert_eq!(out.messages[2].role, "user");
+
+        let assistant_parts = out.messages[1]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(assistant_parts[0]["type"], "text");
+        assert_eq!(assistant_parts[0]["text"], "4");
+    }
+
+    #[test]
+    fn test_output_text_annotations_stripped_during_conversion() {
+        let input = ResponsesApiInput::Items(vec![json!({
+            "type": "message",
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "output_text",
+                    "text": "See reference [1]",
+                    "annotations": [{"type": "url_citation", "url": "https://example.com"}]
+                }
+            ]
+        })]);
+        let req = make_req("gpt-4o", input);
+        let out = responses_to_chat_completion(&req);
+        let parts = out.messages[0]
+            .content
+            .as_ref()
+            .unwrap()
+            .as_array()
+            .unwrap();
+        assert_eq!(parts[0]["type"], "text");
+        assert_eq!(parts[0]["text"], "See reference [1]");
+        assert!(parts[0].get("annotations").is_none());
     }
 
     #[test]
