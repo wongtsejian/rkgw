@@ -1010,12 +1010,13 @@ mod tests {
                 enabled: true,
             })
             .collect::<Vec<_>>();
-        assert_eq!(resp.len(), 4);
+        assert_eq!(resp.len(), 5);
         let ids: Vec<&str> = resp.iter().map(|e| e.id).collect();
         assert!(ids.contains(&"anthropic"));
         assert!(ids.contains(&"openai_codex"));
         assert!(ids.contains(&"kiro"));
         assert!(ids.contains(&"copilot"));
+        assert!(ids.contains(&"huawei_maas"));
         // Verify category values
         let anthropic = resp.iter().find(|e| e.id == "anthropic").unwrap();
         assert_eq!(anthropic.category, "oauth_relay");

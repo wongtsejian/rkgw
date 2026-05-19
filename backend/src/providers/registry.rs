@@ -114,6 +114,20 @@ impl ProviderRegistry {
                 },
             );
         }
+        // Huawei MaaS: use API key if enabled and available
+        if proxy.huawei_maas_enabled {
+            if let Some(ref token) = proxy.huawei_maas_access_token {
+                creds.insert(
+                    ProviderId::HuaweiMaas,
+                    ProviderCredentials {
+                        provider: ProviderId::HuaweiMaas,
+                        access_token: token.clone(),
+                        base_url: proxy.huawei_maas_base_url.clone(),
+                        account_label: "proxy".into(),
+                    },
+                );
+            }
+        }
 
         Self::new_with_proxy(creds)
     }
@@ -1703,19 +1717,24 @@ mod tests {
             openai_access_token: Some("oai-access-tok".to_string()),
             copilot_token: Some("cop-tok".to_string()),
             copilot_base_url: Some("https://api.githubcopilot.com".to_string()),
+            huawei_maas_enabled: true,
+            huawei_maas_access_token: Some("hw-access-tok".to_string()),
+            huawei_maas_base_url: None,
             ..Default::default()
         };
         let registry = ProviderRegistry::from_proxy_config(&proxy);
         let creds = registry.proxy_credentials().unwrap();
-        assert_eq!(creds.len(), 3);
+        assert_eq!(creds.len(), 4);
         assert!(creds.contains_key(&ProviderId::Anthropic));
         assert!(creds.contains_key(&ProviderId::OpenAICodex));
         assert!(creds.contains_key(&ProviderId::Copilot));
+        assert!(creds.contains_key(&ProviderId::HuaweiMaas));
         assert_eq!(creds[&ProviderId::Anthropic].access_token, "ant-access-tok");
         assert_eq!(
             creds[&ProviderId::OpenAICodex].access_token,
             "oai-access-tok"
         );
+        assert_eq!(creds[&ProviderId::HuaweiMaas].access_token, "hw-access-tok");
     }
 
     #[test]
@@ -1732,6 +1751,27 @@ mod tests {
         assert_eq!(creds.len(), 1);
         assert!(creds.contains_key(&ProviderId::Anthropic));
         assert!(!creds.contains_key(&ProviderId::OpenAICodex));
+    }
+
+    #[test]
+    fn test_from_proxy_config_huawei_maas_with_custom_base_url() {
+        use crate::config::ProxyConfig;
+        let proxy = ProxyConfig {
+            api_key: "test-key-long-enough".to_string(),
+            huawei_maas_enabled: true,
+            huawei_maas_access_token: Some("hw-key".to_string()),
+            huawei_maas_base_url: Some("https://custom-maas.example.com/openai/v1".to_string()),
+            ..Default::default()
+        };
+        let registry = ProviderRegistry::from_proxy_config(&proxy);
+        let creds = registry.proxy_credentials().unwrap();
+        assert_eq!(creds.len(), 1);
+        assert!(creds.contains_key(&ProviderId::HuaweiMaas));
+        assert_eq!(creds[&ProviderId::HuaweiMaas].access_token, "hw-key");
+        assert_eq!(
+            creds[&ProviderId::HuaweiMaas].base_url.as_deref(),
+            Some("https://custom-maas.example.com/openai/v1")
+        );
     }
 
     #[test]

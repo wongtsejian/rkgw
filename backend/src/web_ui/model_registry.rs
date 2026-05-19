@@ -397,6 +397,41 @@ pub async fn populate_provider(
                 }
             }
         }
+        ProviderId::HuaweiMaas => {
+            // Try admin pool first
+            let from_admin = if let Some((api_key, base_url)) =
+                get_admin_pool_credential(db, "huawei_maas").await
+            {
+                tracing::debug!("huawei_maas: trying admin pool credential");
+                let base = base_url
+                    .as_deref()
+                    .or(pid.default_base_url())
+                    .unwrap_or("https://api-ap-southeast-1.modelarts-maas.com/openai/v1");
+                fetch_openai_compatible_models(http_client, "huawei_maas", base, &api_key)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            if from_admin.as_ref().is_some_and(|m| !m.is_empty()) {
+                from_admin
+            } else {
+                // Fallback: any user's connected Huawei MaaS token
+                tracing::debug!("huawei_maas: falling back to user provider token");
+                match db.get_any_user_provider_credential("huawei_maas").await {
+                    Ok(Some((api_key, base_url))) => {
+                        let base = base_url
+                            .as_deref()
+                            .or(pid.default_base_url())
+                            .unwrap_or("https://api-ap-southeast-1.modelarts-maas.com/openai/v1");
+                        fetch_openai_compatible_models(http_client, "huawei_maas", base, &api_key)
+                            .await
+                            .ok()
+                    }
+                    _ => None,
+                }
+            }
+        }
     };
 
     // Keep-last-successful: if API returns empty or fails, try static fallback

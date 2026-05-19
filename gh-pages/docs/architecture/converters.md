@@ -425,7 +425,69 @@ flowchart TB
 
 ---
 
-## Design Decisions
+## Responses API ↔ Chat Completions Converter
+
+The gateway supports the OpenAI Responses API (`/v1/responses`) used by Codex CLI and the OpenAI Agents SDK. Since all upstream providers use the Chat Completions format, the gateway converts Responses API requests to Chat Completions format before routing, then converts the Chat Completions response back to Responses API format before returning it to the client.
+
+This conversion is **bidirectional** and applies to both streaming and non-streaming requests.
+
+### Request Conversion: Responses API → Chat Completions
+
+The inbound converter transforms a Responses API request body into a Chat Completions request body:
+
+| Responses API Field | Chat Completions Field | Notes |
+|--------------------|-----------------------|-------|
+| `model` | `model` | Passed through. Provider prefixes (`huawei_maas/`, etc.) are resolved normally. |
+| `input` (string) | `messages` | Single string becomes `[{"role": "user", "content": input}]`. |
+| `input` (array) | `messages` | Input items are mapped to message objects. Function call outputs become `tool` role messages. |
+| `instructions` | `messages` (system) | Prepended as `{"role": "system", "content": instructions}`. |
+| `max_output_tokens` | `max_tokens` | Direct rename. |
+| `tools` (flat) | `tools` (nested) | Flat tool definitions are wrapped in `{"type": "function", "function": {...}}`. |
+| `tool_choice` | `tool_choice` | Passed through. |
+| `parallel_tool_calls` | `parallel_tool_calls` | Passed through. |
+| `reasoning.effort` | `reasoning_effort` | Nested field extracted to top-level. |
+| `text.format` | `response_format` | Nested field extracted to top-level. |
+| `temperature` | `temperature` | Passed through. |
+| `top_p` | `top_p` | Passed through. |
+| `stream` | `stream` | Passed through. |
+| `metadata` | — | Accepted but not forwarded. |
+| `previous_response_id` | — | Accepted for compatibility but not forwarded. |
+| `store` | — | Accepted for compatibility but not forwarded. |
+| `truncation` | — | Accepted for compatibility but not forwarded. |
+| `user` | — | Accepted for compatibility but not forwarded. |
+
+### Response Conversion: Chat Completions → Responses API
+
+The outbound converter transforms a Chat Completions response into a Responses API response:
+
+| Chat Completions Field | Responses API Field | Notes |
+|-----------------------|--------------------|-------|
+| `id` (chatcmpl-*) | `id` (resp-*) | Prefix changed from `chatcmpl-` to `resp_`. |
+| — | `object` | Set to `"response"`. |
+| `created` | `created_at` | Renamed. |
+| — | `status` | Set to `"completed"` for non-streaming, `"in_progress"` during streaming. |
+| `model` | `model` | Passed through. |
+| `choices[0].message` | `output[]` | Message content becomes an output item of type `message`. |
+| `choices[0].message.tool_calls` | `output[]` | Tool calls become output items of type `function_call`. |
+| `choices[0].message.reasoning_content` | `output[]` | Reasoning content becomes an output item of type `reasoning`. |
+| `usage` | `usage` | Field names mapped: `prompt_tokens` → `input_tokens`, `completion_tokens` → `output_tokens`, `total_tokens` → `total_tokens`. |
+
+### Streaming Conversion
+
+When streaming, the gateway converts Chat Completions SSE chunks into Responses API SSE events:
+
+| Chat Completions Event | Responses API Event | Notes |
+|-----------------------|--------------------|-------|
+| (request start) | `response.created` | Emitted at the start of the stream. |
+| (request start) | `response.in_progress` | Emitted after `response.created`. |
+| `choices[0].delta.content` | `response.output_text.delta` | Text content delta. |
+| `choices[0].delta.tool_calls` | `response.function_call_arguments.delta` | Function call arguments delta. |
+| `choices[0].delta.reasoning_content` | `response.reasoning.delta` | Reasoning content delta. |
+| `[DONE]` | `response.completed` | Final event with full response and usage. |
+
+Intermediate events (`response.output_item.added`, `response.content_part.added`, `response.content_part.done`, `response.output_item.done`) are emitted at the appropriate boundaries to maintain the Responses API event sequence.
+
+---
 
 ### Why a Unified Intermediate Format?
 

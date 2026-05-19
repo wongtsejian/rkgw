@@ -31,7 +31,7 @@ Harbangan has two deployment modes with different configuration models:
 
 Set these in `.env.proxy` (copy from `.env.proxy.example`) and pass via `--env-file .env.proxy` when running `docker compose -f docker-compose.gateway.yml`.
 
-Proxy-Only Mode supports **multiple providers** via environment variables: Kiro (AWS CodeWhisperer), Anthropic, OpenAI Codex, GitHub Copilot, and custom OpenAI-compatible endpoints.
+Proxy-Only Mode supports **multiple providers** via environment variables: Kiro (AWS CodeWhisperer), Anthropic, OpenAI Codex, GitHub Copilot, Huawei MaaS, and custom OpenAI-compatible endpoints.
 
 ### Required
 
@@ -61,6 +61,9 @@ Proxy-Only Mode supports **multiple providers** via environment variables: Kiro 
 | `COPILOT_TOKEN` | _(none)_ | GitHub Copilot token. |
 | `COPILOT_BASE_URL` | `https://api.githubcopilot.com` | Copilot API base URL. |
 | `COPILOT_PERSIST_GITHUB_TOKEN` | `false` | Persist GitHub access token for background Copilot token refresh. |
+| `HUAWEI_MAAS_ENABLED` | `false` | Set to `true` to enable Huawei MaaS provider. |
+| `HUAWEI_MAAS_ACCESS_TOKEN` | _(none)_ | Huawei MaaS API key. |
+| `HUAWEI_MAAS_BASE_URL` | `https://api-ap-southeast-1.modelarts-maas.com/openai/v1` | Huawei MaaS API base URL. Override for custom MaaS endpoints or different regions. |
 
 ### Builder ID vs Identity Center
 
@@ -92,6 +95,11 @@ PROXY_API_KEY=your-api-key-here
 # Optional: Logging
 # LOG_LEVEL=info
 # DEBUG_MODE=off
+
+# Optional: Huawei MaaS (direct API key, OpenAI-compatible)
+# HUAWEI_MAAS_ENABLED=false
+# HUAWEI_MAAS_ACCESS_TOKEN=
+# HUAWEI_MAAS_BASE_URL=https://api-ap-southeast-1.modelarts-maas.com/openai/v1
 ```
 
 ---
@@ -123,6 +131,15 @@ Google SSO is configured exclusively via the Admin UI after initial login — th
 #### Provider OAuth
 
 Provider OAuth client IDs (Anthropic, OpenAI) are configured via the Admin UI under Configuration, not via environment variables. Copilot in Full Deployment mode uses the device code flow initiated from the Web UI — no env vars needed.
+
+#### Huawei MaaS
+
+Huawei MaaS is available in full deployment mode and can be configured two ways:
+
+- **Admin pool credentials** — Configure shared Huawei MaaS API keys in **Admin UI → Provider Pool**. All users share these credentials.
+- **User provider tokens** — Each user adds their own Huawei MaaS API key via **Web UI → Providers → Huawei MaaS**.
+
+The default base URL is `https://api-ap-southeast-1.modelarts-maas.com/openai/v1`. The completions endpoint is `{base_url}/chat/completions`.
 
 #### Security
 

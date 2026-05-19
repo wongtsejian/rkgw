@@ -646,6 +646,7 @@ mod tests {
                 name: "get_weather".to_string(),
                 description: Some("Get weather".to_string()),
                 parameters: Some(json!({"type": "object"})),
+                strict: None,
             },
         })];
 
@@ -933,6 +934,7 @@ mod tests {
                             "location": {"type": "string"}
                         }
                     })),
+                    strict: None,
                 },
             })]),
             tool_choice: None,
@@ -1372,6 +1374,7 @@ mod tests {
                     name: "Read".to_string(),
                     description: Some("Read a file".to_string()),
                     parameters: Some(json!({"type": "object"})),
+                    strict: None,
                 },
             })]),
             tool_choice: None,

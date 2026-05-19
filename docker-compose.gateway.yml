@@ -22,6 +22,11 @@
 #   OPENAI_ENABLED       — Set to "true" to enable OpenAI OAuth relay (default: false)
 #   OPENAI_OAUTH_CLIENT_ID — OAuth client ID for OpenAI PKCE flow
 #
+# Optional (Huawei MaaS — direct API key, OpenAI-compatible):
+#   HUAWEI_MAAS_ENABLED     — Set to "true" to enable Huawei MaaS (default: false)
+#   HUAWEI_MAAS_ACCESS_TOKEN — Huawei MaaS API key
+#   HUAWEI_MAAS_BASE_URL    — Huawei MaaS API base URL (default: https://api-ap-southeast-1.modelarts-maas.com/openai/v1)
+#
 # Optional (general):
 #   SERVER_PORT          — Listen port (default: 8000)
 #   LOG_LEVEL            — info, debug, warn, error (default: info)
@@ -65,6 +70,10 @@ services:
       # OpenAI (Optional — OAuth relay, connect after startup)
       OPENAI_ENABLED: "${OPENAI_ENABLED:-false}"
       OPENAI_OAUTH_CLIENT_ID: "${OPENAI_OAUTH_CLIENT_ID:-}"
+      # Huawei MaaS (Optional — direct API key, OpenAI-compatible)
+      HUAWEI_MAAS_ENABLED: "${HUAWEI_MAAS_ENABLED:-false}"
+      HUAWEI_MAAS_ACCESS_TOKEN: "${HUAWEI_MAAS_ACCESS_TOKEN:-}"
+      HUAWEI_MAAS_BASE_URL: "${HUAWEI_MAAS_BASE_URL:-}"
     volumes:
       - gateway-data:/data
       - ./backend/entrypoint.sh:/app/entrypoint.sh:ro

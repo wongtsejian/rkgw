@@ -27,6 +27,10 @@ pub struct ProxyConfig {
     pub copilot_token: Option<String>,
     pub copilot_base_url: Option<String>,
     pub copilot_github_token: Option<String>,
+    // Huawei MaaS (direct API key, OpenAI-compatible)
+    pub huawei_maas_enabled: bool,
+    pub huawei_maas_access_token: Option<String>,
+    pub huawei_maas_base_url: Option<String>,
 }
 
 #[derive(Clone)]
@@ -278,6 +282,15 @@ impl Config {
                     .ok()
                     .filter(|s| !s.is_empty()),
                 copilot_github_token: std::env::var("COPILOT_GITHUB_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
+                huawei_maas_enabled: std::env::var("HUAWEI_MAAS_ENABLED")
+                    .map(|v| v == "true" || v == "1")
+                    .unwrap_or(false),
+                huawei_maas_access_token: std::env::var("HUAWEI_MAAS_ACCESS_TOKEN")
+                    .ok()
+                    .filter(|s| !s.is_empty()),
+                huawei_maas_base_url: std::env::var("HUAWEI_MAAS_BASE_URL")
                     .ok()
                     .filter(|s| !s.is_empty()),
             });
@@ -578,6 +591,9 @@ mod tests {
         assert!(proxy.copilot_token.is_none());
         assert!(proxy.copilot_base_url.is_none());
         assert!(proxy.copilot_github_token.is_none());
+        assert!(!proxy.huawei_maas_enabled);
+        assert!(proxy.huawei_maas_access_token.is_none());
+        assert!(proxy.huawei_maas_base_url.is_none());
     }
 
     #[test]
@@ -599,6 +615,9 @@ mod tests {
             copilot_token: Some("cop-tok-test".to_string()),
             copilot_base_url: Some("https://api.githubcopilot.com".to_string()),
             copilot_github_token: Some("gh-token".to_string()),
+            huawei_maas_enabled: true,
+            huawei_maas_access_token: Some("hw-access-tok".to_string()),
+            huawei_maas_base_url: Some("https://custom-maas.example.com/openai/v1".to_string()),
         };
         assert!(proxy.anthropic_enabled);
         assert_eq!(
@@ -617,6 +636,15 @@ mod tests {
             Some("https://api.githubcopilot.com")
         );
         assert_eq!(proxy.copilot_github_token.as_deref(), Some("gh-token"));
+        assert!(proxy.huawei_maas_enabled);
+        assert_eq!(
+            proxy.huawei_maas_access_token.as_deref(),
+            Some("hw-access-tok")
+        );
+        assert_eq!(
+            proxy.huawei_maas_base_url.as_deref(),
+            Some("https://custom-maas.example.com/openai/v1")
+        );
     }
 
     #[test]
@@ -650,6 +678,8 @@ mod tests {
         assert!(!proxy.openai_enabled);
         assert!(proxy.openai_access_token.is_none());
         assert!(proxy.copilot_token.is_none());
+        assert!(!proxy.huawei_maas_enabled);
+        assert!(proxy.huawei_maas_access_token.is_none());
     }
 
     // ── Google SSO config struct tests ───────────────────────────────

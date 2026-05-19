@@ -5,6 +5,7 @@ pub mod kiro_to_anthropic;
 pub mod kiro_to_openai;
 pub mod openai_to_anthropic;
 pub mod openai_to_kiro;
+pub mod responses_to_chat_completion;
 
 /// Integration tests: converter round-trips across format boundaries.
 ///
@@ -298,6 +299,7 @@ mod tests {
                 parameters: Some(
                     json!({"type": "object", "properties": {"q": {"type": "string"}}}),
                 ),
+                strict: None,
             },
         })
     }

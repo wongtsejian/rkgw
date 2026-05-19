@@ -15,6 +15,8 @@ pub enum ProviderId {
     OpenAICodex,
     #[serde(rename = "copilot")]
     Copilot,
+    #[serde(rename = "huawei_maas")]
+    HuaweiMaas,
 }
 
 impl ProviderId {
@@ -25,6 +27,7 @@ impl ProviderId {
             ProviderId::Anthropic => "anthropic",
             ProviderId::OpenAICodex => "openai_codex",
             ProviderId::Copilot => "copilot",
+            ProviderId::HuaweiMaas => "huawei_maas",
         }
     }
 
@@ -35,16 +38,19 @@ impl ProviderId {
             ProviderId::Anthropic => "Anthropic",
             ProviderId::OpenAICodex => "OpenAI Codex",
             ProviderId::Copilot => "Copilot",
+            ProviderId::HuaweiMaas => "Huawei MaaS",
         }
     }
 
     /// Authentication category: how the provider acquires credentials.
     /// - `"device_code"`: Device authorization flow (Kiro, Copilot)
     /// - `"oauth_relay"`: API key stored per-user (Anthropic, OpenAI)
+    /// - `"api_key"`: Static API key (Huawei MaaS)
     pub fn category(&self) -> &'static str {
         match self {
             ProviderId::Kiro | ProviderId::Copilot => "device_code",
             ProviderId::Anthropic | ProviderId::OpenAICodex => "oauth_relay",
+            ProviderId::HuaweiMaas => "api_key",
         }
     }
 
@@ -60,6 +66,7 @@ impl ProviderId {
             ProviderId::Anthropic,
             ProviderId::OpenAICodex,
             ProviderId::Copilot,
+            ProviderId::HuaweiMaas,
         ]
     }
 
@@ -69,6 +76,9 @@ impl ProviderId {
             ProviderId::Anthropic => Some("https://api.anthropic.com"),
             ProviderId::OpenAICodex => Some("https://api.openai.com"),
             ProviderId::Copilot => Some("https://api.githubcopilot.com"),
+            ProviderId::HuaweiMaas => {
+                Some("https://api-ap-southeast-1.modelarts-maas.com/openai/v1")
+            }
             ProviderId::Kiro => None,
         }
     }
@@ -89,6 +99,7 @@ impl std::str::FromStr for ProviderId {
             "anthropic" => Ok(ProviderId::Anthropic),
             "openai_codex" | "openai" => Ok(ProviderId::OpenAICodex),
             "copilot" => Ok(ProviderId::Copilot),
+            "huawei_maas" | "huawei" => Ok(ProviderId::HuaweiMaas),
             other => Err(format!("Unknown provider: {}", other)),
         }
     }
@@ -151,6 +162,7 @@ mod tests {
         assert_eq!(ProviderId::Anthropic.as_str(), "anthropic");
         assert_eq!(ProviderId::OpenAICodex.as_str(), "openai_codex");
         assert_eq!(ProviderId::Copilot.as_str(), "copilot");
+        assert_eq!(ProviderId::HuaweiMaas.as_str(), "huawei_maas");
     }
 
     #[test]
@@ -179,6 +191,14 @@ mod tests {
         assert_eq!(
             ProviderId::from_str("copilot").unwrap(),
             ProviderId::Copilot
+        );
+        assert_eq!(
+            ProviderId::from_str("huawei_maas").unwrap(),
+            ProviderId::HuaweiMaas
+        );
+        assert_eq!(
+            ProviderId::from_str("huawei").unwrap(),
+            ProviderId::HuaweiMaas
         );
         assert!(ProviderId::from_str("custom").is_err());
         assert!(ProviderId::from_str("unknown").is_err());
@@ -226,6 +246,7 @@ mod tests {
             ProviderId::Anthropic,
             ProviderId::OpenAICodex,
             ProviderId::Copilot,
+            ProviderId::HuaweiMaas,
         ] {
             let json = serde_json::to_string(&id).unwrap();
             let back: ProviderId = serde_json::from_str(&json).unwrap();
@@ -282,6 +303,7 @@ mod tests {
         assert_eq!(ProviderId::Anthropic.display_name(), "Anthropic");
         assert_eq!(ProviderId::OpenAICodex.display_name(), "OpenAI Codex");
         assert_eq!(ProviderId::Copilot.display_name(), "Copilot");
+        assert_eq!(ProviderId::HuaweiMaas.display_name(), "Huawei MaaS");
     }
 
     #[test]
@@ -290,6 +312,7 @@ mod tests {
         assert_eq!(ProviderId::Anthropic.category(), "oauth_relay");
         assert_eq!(ProviderId::OpenAICodex.category(), "oauth_relay");
         assert_eq!(ProviderId::Copilot.category(), "device_code");
+        assert_eq!(ProviderId::HuaweiMaas.category(), "api_key");
     }
 
     #[test]
@@ -298,16 +321,18 @@ mod tests {
         assert!(ProviderId::Anthropic.supports_pool());
         assert!(ProviderId::OpenAICodex.supports_pool());
         assert!(ProviderId::Copilot.supports_pool());
+        assert!(ProviderId::HuaweiMaas.supports_pool());
     }
 
     #[test]
     fn test_all_visible_contains_all_providers() {
         let visible = ProviderId::all_visible();
-        assert_eq!(visible.len(), 4);
+        assert_eq!(visible.len(), 5);
         assert!(visible.contains(&ProviderId::Kiro));
         assert!(visible.contains(&ProviderId::Anthropic));
         assert!(visible.contains(&ProviderId::OpenAICodex));
         assert!(visible.contains(&ProviderId::Copilot));
+        assert!(visible.contains(&ProviderId::HuaweiMaas));
     }
 
     #[test]
@@ -323,6 +348,10 @@ mod tests {
         assert_eq!(
             ProviderId::Copilot.default_base_url(),
             Some("https://api.githubcopilot.com")
+        );
+        assert_eq!(
+            ProviderId::HuaweiMaas.default_base_url(),
+            Some("https://api-ap-southeast-1.modelarts-maas.com/openai/v1")
         );
         assert_eq!(ProviderId::Kiro.default_base_url(), None);
     }
