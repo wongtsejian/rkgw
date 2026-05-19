@@ -24,5 +24,4 @@ regexes = [
   '''test[-_](key|token|secret|password)''',
   '''fake[-_](key|token|secret|password)''',
   '''<(secret|password|token|api[-_]key)>''',
-  '''Authorization: Bearer <key>''',
 ]
