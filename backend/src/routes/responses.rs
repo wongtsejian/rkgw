@@ -51,13 +51,7 @@ pub(crate) async fn responses_handler(
     }
 
     // Validate request isn't pathologically large.
-    if let ResponsesApiInput::Items(ref items) = responses_req.input {
-        if items.len() > 1000 {
-            return Err(ApiError::ValidationError(
-                "Too many input items in request (max 1000)".to_string(),
-            ));
-        }
-    }
+    validate_input_item_count(&responses_req.input)?;
 
     let is_stream = responses_req.stream.unwrap_or(false);
 
@@ -119,16 +113,36 @@ pub(crate) async fn responses_handler(
 
     // Truncation recovery (Kiro-specific, but harmless for others)
     if routing.provider_id == ProviderId::Kiro && config.truncation_recovery {
+        let original_count = chat_req.messages.len();
         let mut msg_values: Vec<serde_json::Value> = chat_req
             .messages
             .iter()
-            .filter_map(|m| serde_json::to_value(m).ok())
+            .filter_map(|m| match serde_json::to_value(m) {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to serialize message for truncation recovery");
+                    None
+                }
+            })
             .collect();
         crate::truncation::inject_openai_truncation_recovery(&mut msg_values);
         chat_req.messages = msg_values
             .into_iter()
-            .filter_map(|v| serde_json::from_value(v).ok())
+            .filter_map(|v| match serde_json::from_value(v) {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    tracing::error!(error = %e, "Failed to deserialize message after truncation injection");
+                    None
+                }
+            })
             .collect();
+        if chat_req.messages.len() != original_count {
+            tracing::warn!(
+                original = original_count,
+                remaining = chat_req.messages.len(),
+                "Messages lost during truncation recovery round-trip"
+            );
+        }
     }
 
     // Input guardrails
@@ -201,6 +215,12 @@ pub(crate) async fn responses_handler(
                     ref headers,
                     ..
                 }) => {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_attempts = MAX_ATTEMPTS,
+                        provider = ?routing.provider_id,
+                        "Rate limited (429), attempting failover"
+                    );
                     if !handle_rate_limit_retry(
                         &state,
                         user_creds.as_ref(),
@@ -213,10 +233,20 @@ pub(crate) async fn responses_handler(
                     )
                     .await?
                     {
+                        tracing::warn!(
+                            provider = ?routing.provider_id,
+                            "No alternative accounts available for failover"
+                        );
                         break;
                     }
                 }
                 Err(e) => {
+                    tracing::error!(
+                        attempt = attempt + 1,
+                        provider = ?routing.provider_id,
+                        error = ?e,
+                        "Provider request failed (streaming)"
+                    );
                     last_error = Some(e);
                     break;
                 }
@@ -275,6 +305,12 @@ pub(crate) async fn responses_handler(
                     ref headers,
                     ..
                 }) => {
+                    tracing::warn!(
+                        attempt = attempt + 1,
+                        max_attempts = MAX_ATTEMPTS,
+                        provider = ?routing.provider_id,
+                        "Rate limited (429), attempting failover"
+                    );
                     if !handle_rate_limit_retry(
                         &state,
                         user_creds.as_ref(),
@@ -287,10 +323,20 @@ pub(crate) async fn responses_handler(
                     )
                     .await?
                     {
+                        tracing::warn!(
+                            provider = ?routing.provider_id,
+                            "No alternative accounts available for failover"
+                        );
                         break;
                     }
                 }
                 Err(e) => {
+                    tracing::error!(
+                        attempt = attempt + 1,
+                        provider = ?routing.provider_id,
+                        error = ?e,
+                        "Provider request failed (non-streaming)"
+                    );
                     last_error = Some(e);
                     break;
                 }
@@ -301,6 +347,19 @@ pub(crate) async fn responses_handler(
             retry_after_secs: 60,
         }))
     }
+}
+
+const MAX_INPUT_ITEMS: usize = 1000;
+
+fn validate_input_item_count(input: &ResponsesApiInput) -> Result<(), ApiError> {
+    if let ResponsesApiInput::Items(ref items) = input {
+        if items.len() > MAX_INPUT_ITEMS {
+            return Err(ApiError::ValidationError(
+                format!("Too many input items in request (max {})", MAX_INPUT_ITEMS),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Transform a Chat Completion SSE stream into a Responses API SSE stream.
@@ -418,6 +477,11 @@ where
                     for event in events {
                         yield Ok(bytes::Bytes::from(event));
                     }
+                } else {
+                    tracing::warn!(
+                        data = %data,
+                        "Responses SSE: failed to parse JSON in buffer drain (possible stream truncation)"
+                    );
                 }
             }
         }
@@ -610,24 +674,22 @@ mod tests {
     /// Input item count validation (M8).
     #[test]
     fn test_input_items_count_validation() {
-        // Items with ≤ 1000 items should be accepted (no panic on construction).
+        // Items at the limit should pass.
         let items: Vec<serde_json::Value> = (0..1000)
             .map(|_| serde_json::json!({"role": "user", "content": "hi"}))
             .collect();
         let input = ResponsesApiInput::Items(items);
-        // Just verifying the count is accessible and within limit.
-        if let ResponsesApiInput::Items(ref i) = input {
-            assert_eq!(i.len(), 1000);
-            assert!(i.len() <= 1000);
-        }
+        assert!(validate_input_item_count(&input).is_ok());
 
-        // Items with > 1000 should exceed the limit.
+        // Text input should always pass (no item count).
+        let text_input = ResponsesApiInput::Text("hello".to_string());
+        assert!(validate_input_item_count(&text_input).is_ok());
+
+        // Items exceeding the limit should fail.
         let big_items: Vec<serde_json::Value> = (0..1001)
             .map(|_| serde_json::json!({"role": "user", "content": "hi"}))
             .collect();
         let big_input = ResponsesApiInput::Items(big_items);
-        if let ResponsesApiInput::Items(ref i) = big_input {
-            assert!(i.len() > 1000);
-        }
+        assert!(validate_input_item_count(&big_input).is_err());
     }
 }

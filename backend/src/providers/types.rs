@@ -45,12 +45,12 @@ impl ProviderId {
     /// Authentication category: how the provider acquires credentials.
     /// - `"device_code"`: Device authorization flow (Kiro, Copilot)
     /// - `"oauth_relay"`: API key stored per-user (Anthropic, OpenAI)
+    /// - `"api_key"`: Static API key (Huawei MaaS)
     pub fn category(&self) -> &'static str {
         match self {
             ProviderId::Kiro | ProviderId::Copilot => "device_code",
-            ProviderId::Anthropic | ProviderId::OpenAICodex | ProviderId::HuaweiMaas => {
-                "oauth_relay"
-            }
+            ProviderId::Anthropic | ProviderId::OpenAICodex => "oauth_relay",
+            ProviderId::HuaweiMaas => "api_key",
         }
     }
 
@@ -312,7 +312,7 @@ mod tests {
         assert_eq!(ProviderId::Anthropic.category(), "oauth_relay");
         assert_eq!(ProviderId::OpenAICodex.category(), "oauth_relay");
         assert_eq!(ProviderId::Copilot.category(), "device_code");
-        assert_eq!(ProviderId::HuaweiMaas.category(), "oauth_relay");
+        assert_eq!(ProviderId::HuaweiMaas.category(), "api_key");
     }
 
     #[test]

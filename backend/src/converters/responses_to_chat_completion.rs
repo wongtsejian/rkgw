@@ -191,7 +191,13 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                     .get("call_id")
                     .or_else(|| item.get("id"))
                     .and_then(|v| v.as_str())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        tracing::warn!(
+                            item_type = "function_call",
+                            "Input item missing required call_id/id field; upstream provider may reject"
+                        );
+                        ""
+                    });
                 let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -216,7 +222,13 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                 let call_id = item
                     .get("call_id")
                     .and_then(|v| v.as_str())
-                    .unwrap_or_default();
+                    .unwrap_or_else(|| {
+                        tracing::warn!(
+                            item_type = "function_call_output",
+                            "Input item missing required call_id field; upstream provider may reject"
+                        );
+                        ""
+                    });
                 let output = item.get("output").and_then(|v| v.as_str()).unwrap_or("");
 
                 messages.push(ChatMessage {
@@ -256,7 +268,8 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
     // H3: Warn when non-function tools are dropped.
     // H4: Map strict field during tool conversion.
     let tools: Option<Vec<Tool>> = req.tools.as_ref().map(|tools| {
-        tools
+        let total_count = tools.len();
+        let converted: Vec<Tool> = tools
             .iter()
             .filter_map(|t| {
                 if t.tool_type != "function" {
@@ -278,7 +291,16 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                     }))
                 }
             })
-            .collect()
+            .collect();
+        let dropped = total_count - converted.len();
+        if dropped > 0 {
+            tracing::warn!(
+                dropped_count = dropped,
+                total_count = total_count,
+                "Non-function tools were dropped; model will not be able to call them"
+            );
+        }
+        converted
     });
 
     // Map text.format → response_format
@@ -395,7 +417,13 @@ pub fn chat_completion_to_responses_api(
     let created_at = chat_resp
         .get("created")
         .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+        .unwrap_or_else(|| {
+            tracing::warn!(
+                response_id = %chat_id,
+                "Chat completion response missing or non-integer 'created' field, using current time"
+            );
+            chrono::Utc::now().timestamp()
+        });
 
     let model = model.to_string();
 
@@ -1114,7 +1142,12 @@ impl ResponsesStreamTransformer {
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                         for tc in tool_calls {
                             let tc_index =
-                                tc.get("index").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+                                tc.get("index").and_then(|v| v.as_i64()).unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        "Streaming tool_call delta missing 'index' field, defaulting to 0"
+                                    );
+                                    0
+                                }) as i32;
                             let msg_output_index = self.message_output_index();
                             let fc_output_index = msg_output_index + 1 + tc_index;
 
@@ -1254,11 +1287,15 @@ impl ResponsesStreamTransformer {
 
 /// Format a single SSE event as `event: <type>\ndata: <json>\n\n`.
 fn format_sse_event(event_type: &str, data: &Value) -> String {
-    format!(
-        "event: {}\ndata: {}\n\n",
-        event_type,
-        serde_json::to_string(data).unwrap_or_else(|_| "{}".to_string())
-    )
+    let json = serde_json::to_string(data).unwrap_or_else(|e| {
+        tracing::error!(
+            event_type = event_type,
+            error = %e,
+            "Failed to serialize SSE event data"
+        );
+        "{}".to_string()
+    });
+    format!("event: {}\ndata: {}\n\n", event_type, json)
 }
 
 // ==================================================================================================

@@ -114,17 +114,19 @@ impl ProviderRegistry {
                 },
             );
         }
-        // Huawei MaaS: use API key if available
-        if let Some(ref token) = proxy.huawei_maas_access_token {
-            creds.insert(
-                ProviderId::HuaweiMaas,
-                ProviderCredentials {
-                    provider: ProviderId::HuaweiMaas,
-                    access_token: token.clone(),
-                    base_url: proxy.huawei_maas_base_url.clone(),
-                    account_label: "proxy".into(),
-                },
-            );
+        // Huawei MaaS: use API key if enabled and available
+        if proxy.huawei_maas_enabled {
+            if let Some(ref token) = proxy.huawei_maas_access_token {
+                creds.insert(
+                    ProviderId::HuaweiMaas,
+                    ProviderCredentials {
+                        provider: ProviderId::HuaweiMaas,
+                        access_token: token.clone(),
+                        base_url: proxy.huawei_maas_base_url.clone(),
+                        account_label: "proxy".into(),
+                    },
+                );
+            }
         }
 
         Self::new_with_proxy(creds)
