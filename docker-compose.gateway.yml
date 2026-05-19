@@ -40,7 +40,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    image: ghcr.io/if414013/harbangan-backend:${IMAGE_TAG:-latest}
+    image: ghcr.io/if414013/harbangan-backend:${IMAGE_TAG:-dev}
     restart: on-failure:5
     entrypoint: ["/app/entrypoint.sh"]
     ports:

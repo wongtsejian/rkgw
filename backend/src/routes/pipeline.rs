@@ -213,6 +213,48 @@ pub(crate) async fn build_kiro_credentials(
     })
 }
 
+/// Result of the full provider resolution pipeline: routing and credentials.
+pub(crate) struct ResolvedProvider {
+    pub routing: ProviderRouting,
+    pub credentials: ProviderCredentials,
+}
+
+/// Validate, route, and resolve credentials for a given model request.
+///
+/// Combines model validation, provider routing, credential building into a single
+/// call to avoid duplicating this sequence across handlers.
+pub(crate) async fn resolve_provider(
+    state: &AppState,
+    user_creds: Option<&UserKiroCreds>,
+    requested_model: &str,
+) -> Result<ResolvedProvider, ApiError> {
+    validate_model_provider(requested_model)?;
+    validate_provider_enabled(&state.provider_registry, requested_model).await?;
+    let mut routing = resolve_provider_routing(state, user_creds, requested_model).await;
+    validate_model_visibility(
+        &state.model_cache,
+        &routing.provider_id,
+        requested_model,
+        routing.stripped_model.as_deref(),
+    )?;
+
+    let credentials = if routing.provider_id == ProviderId::Kiro {
+        build_kiro_credentials(state, user_creds).await?
+    } else {
+        routing.provider_creds.take().ok_or_else(|| {
+            ApiError::AuthError(format!(
+                "No credentials available for provider {}",
+                routing.provider_id
+            ))
+        })?
+    };
+
+    Ok(ResolvedProvider {
+        routing,
+        credentials,
+    })
+}
+
 /// Read the config snapshot for guardrail checks in the pipeline.
 pub(crate) fn read_config(state: &AppState) -> Config {
     state

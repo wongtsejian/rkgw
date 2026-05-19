@@ -635,21 +635,28 @@ pub struct ActiveFunctionCall {
 /// - **M1**: `content_part.done` and `output_item.done` carry accumulated text
 /// - **M2**: Reasoning content uses a proper output index instead of the `-1` hack
 /// - **M6**: Maps `content_filter` finish_reason to `"incomplete"` status
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum TransformerPhase {
+    NotStarted,
+    Initiated,
+    Reasoning,
+    ReasoningDone,
+    MessageInProgress,
+    Completed,
+}
+
 pub struct ResponsesStreamTransformer {
     response_id: String,
     model: String,
-    initial_events_emitted: bool,
-    reasoning_started: bool,
-    reasoning_done: bool,
+    phase: TransformerPhase,
+    had_reasoning: bool,
     reasoning_text: String,
-    message_started: bool,
     message_text: String,
     active_function_calls: Vec<ActiveFunctionCall>,
     chunk_id: String,
     msg_id: String,
     resp_id: String,
     created: i64,
-    completed_emitted: bool,
     /// Request context for echoing parameters in `response.completed`.
     request_input: Option<ResponsesApiInput>,
     request_context: Option<Value>,
@@ -665,18 +672,15 @@ impl ResponsesStreamTransformer {
         Self {
             response_id: response_id.to_string(),
             model: model.to_string(),
-            initial_events_emitted: false,
-            reasoning_started: false,
-            reasoning_done: false,
+            phase: TransformerPhase::NotStarted,
+            had_reasoning: false,
             reasoning_text: String::new(),
-            message_started: false,
             message_text: String::new(),
             active_function_calls: Vec::new(),
             chunk_id: response_id.to_string(),
             msg_id: format!("msg_{}", response_id),
             resp_id: format!("resp_{}", response_id),
             created: 0,
-            completed_emitted: false,
             request_input: None,
             request_context: None,
         }
@@ -737,7 +741,7 @@ impl ResponsesStreamTransformer {
     /// The output index for the message item.
     /// If reasoning was emitted, the message comes after it at index 1; otherwise index 0.
     fn message_output_index(&self) -> i32 {
-        if self.reasoning_started {
+        if self.had_reasoning {
             1
         } else {
             0
@@ -746,10 +750,10 @@ impl ResponsesStreamTransformer {
 
     /// Emit `response.created` and `response.in_progress` if they haven't been emitted yet.
     fn ensure_initial_events(&mut self, events: &mut Vec<String>) {
-        if self.initial_events_emitted {
+        if self.phase != TransformerPhase::NotStarted {
             return;
         }
-        self.initial_events_emitted = true;
+        self.phase = TransformerPhase::Initiated;
 
         let response_obj = json!({
             "id": &self.resp_id,
@@ -779,10 +783,10 @@ impl ResponsesStreamTransformer {
 
     /// Close the reasoning output item: emit `content_part.done` + `output_item.done`.
     fn close_reasoning_item(&mut self, events: &mut Vec<String>, status: &str) {
-        if !self.reasoning_started || self.reasoning_done {
+        if self.phase != TransformerPhase::Reasoning {
             return;
         }
-        self.reasoning_done = true;
+        self.phase = TransformerPhase::ReasoningDone;
 
         events.push(format_sse_event(
             "response.content_part.done",
@@ -825,7 +829,7 @@ impl ResponsesStreamTransformer {
     /// emitting `output_item.done` for active function calls, `content_part.done`
     /// and `output_item.done` for the message, building the output array,
     /// constructing the completed response object, merging request context,
-    /// emitting `response.completed`, and setting `completed_emitted = true`.
+    /// emitting `response.completed`, and setting phase to `Completed`.
     fn emit_completion_events(
         &mut self,
         events: &mut Vec<String>,
@@ -836,7 +840,7 @@ impl ResponsesStreamTransformer {
         self.close_reasoning_item(events, status);
 
         // Ensure the message item has been started.
-        if !self.message_started {
+        if self.phase < TransformerPhase::MessageInProgress {
             self.start_message_item(events);
         }
 
@@ -899,7 +903,7 @@ impl ResponsesStreamTransformer {
         // Build the output array for response.completed.
         let mut output: Vec<Value> = Vec::new();
 
-        if self.reasoning_started {
+        if self.had_reasoning {
             output.push(json!({
                 "type": "reasoning",
                 "id": format!("rs_{}", &self.chunk_id),
@@ -970,15 +974,15 @@ impl ResponsesStreamTransformer {
             }),
         ));
 
-        self.completed_emitted = true;
+        self.phase = TransformerPhase::Completed;
     }
 
     /// Start the message output item: emit `output_item.added` + `content_part.added`.
     fn start_message_item(&mut self, events: &mut Vec<String>) {
-        if self.message_started {
+        if self.phase >= TransformerPhase::MessageInProgress {
             return;
         }
-        self.message_started = true;
+        self.phase = TransformerPhase::MessageInProgress;
 
         let msg_output_index = self.message_output_index();
 
@@ -1057,8 +1061,9 @@ impl ResponsesStreamTransformer {
                         if !reasoning.is_empty() {
                             self.ensure_initial_events(&mut events);
 
-                            if !self.reasoning_started {
-                                self.reasoning_started = true;
+                            if self.phase < TransformerPhase::Reasoning {
+                                self.phase = TransformerPhase::Reasoning;
+                                self.had_reasoning = true;
                                 events.push(format_sse_event(
                                     "response.output_item.added",
                                     &json!({
@@ -1106,7 +1111,7 @@ impl ResponsesStreamTransformer {
                         if role == "assistant" {
                             // Start the message item now unless reasoning is active
                             // (in which case we delay until content arrives).
-                            if !self.reasoning_started && !self.message_started {
+                            if self.phase < TransformerPhase::Reasoning {
                                 self.ensure_initial_events(&mut events);
                                 self.start_message_item(&mut events);
                             }
@@ -1118,7 +1123,7 @@ impl ResponsesStreamTransformer {
                         if !content.is_empty() {
                             self.ensure_initial_events(&mut events);
 
-                            if !self.message_started {
+                            if self.phase < TransformerPhase::MessageInProgress {
                                 // Transition from reasoning → message: close reasoning first.
                                 self.close_reasoning_item(&mut events, "completed");
                                 self.start_message_item(&mut events);
@@ -1155,7 +1160,7 @@ impl ResponsesStreamTransformer {
                             if tc.get("id").is_some() {
                                 self.ensure_initial_events(&mut events);
 
-                                if !self.message_started {
+                                if self.phase < TransformerPhase::MessageInProgress {
                                     self.close_reasoning_item(&mut events, "completed");
                                     self.start_message_item(&mut events);
                                 }
@@ -1276,7 +1281,7 @@ impl ResponsesStreamTransformer {
         let mut events = Vec::new();
 
         // Nothing to finalize if we never started or already completed.
-        if !self.initial_events_emitted || self.completed_emitted {
+        if self.phase == TransformerPhase::NotStarted || self.phase == TransformerPhase::Completed {
             return events;
         }
 
