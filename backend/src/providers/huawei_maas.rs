@@ -424,7 +424,10 @@ mod tests {
         HuaweiMaasProvider::normalize_request_body(&mut body);
         let content = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 2);
-        assert!(content[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert!(content[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("does not support vision"));
         assert_eq!(content[1]["text"], "Describe this image");
     }
 
@@ -449,7 +452,10 @@ mod tests {
         // First message: image stripped, notice injected
         let c0 = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(c0.len(), 2);
-        assert!(c0[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert!(c0[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("does not support vision"));
         assert_eq!(c0[1]["text"], "Hello");
 
         // Second message: plain string, untouched
@@ -461,7 +467,10 @@ mod tests {
         // Fourth message: image stripped, notice injected
         let c3 = body["messages"][3]["content"].as_array().unwrap();
         assert_eq!(c3.len(), 2);
-        assert!(c3[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert!(c3[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("does not support vision"));
         assert_eq!(c3[1]["text"], "Another image");
     }
 
@@ -486,6 +495,9 @@ mod tests {
         HuaweiMaasProvider::normalize_request_body(&mut body);
         let content = body["messages"][0]["content"].as_array().unwrap();
         assert_eq!(content.len(), 1);
-        assert!(content[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert!(content[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("does not support vision"));
     }
 }
