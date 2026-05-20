@@ -44,6 +44,31 @@ impl HuaweiMaasProvider {
         format!("{}/chat/completions", self.base_url(ctx))
     }
 
+    /// Strip image_url parts from content arrays — Huawei MaaS does not
+    /// support vision. Injects a notice so the model can acknowledge the gap.
+    fn normalize_request_body(body: &mut Value) {
+        let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
+            return;
+        };
+        for msg in messages {
+            let Some(content) = msg.get_mut("content") else {
+                continue;
+            };
+            if let Some(parts) = content.as_array_mut() {
+                let had_images = parts
+                    .iter()
+                    .any(|p| p.get("type").and_then(|t| t.as_str()) == Some("image_url"));
+                parts.retain(|p| p.get("type").and_then(|t| t.as_str()) != Some("image_url"));
+                if had_images {
+                    parts.insert(
+                        0,
+                        json!({"type": "text", "text": "[Note: Image content was removed — this model does not support vision/image input.]"}),
+                    );
+                }
+            }
+        }
+    }
+
     async fn send_request(
         &self,
         ctx: &ProviderContext<'_>,
@@ -52,6 +77,7 @@ impl HuaweiMaasProvider {
     ) -> Result<reqwest::Response, ApiError> {
         let url = self.completions_url(ctx);
         body["stream"] = json!(stream);
+        Self::normalize_request_body(&mut body);
 
         let client = if stream {
             &self.streaming_client
@@ -352,5 +378,114 @@ mod tests {
 
         let normalized = openai_response_to_anthropic("deepseek-v3", &body);
         assert_eq!(normalized["stop_reason"], "max_tokens");
+    }
+
+    #[test]
+    fn test_normalize_request_body_leaves_text_array_intact() {
+        let mut body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Hello"},
+                    {"type": "text", "text": "World"}
+                ]
+            }]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert_eq!(content[0]["text"], "Hello");
+        assert_eq!(content[1]["text"], "World");
+    }
+
+    #[test]
+    fn test_normalize_request_body_leaves_plain_string_content() {
+        let mut body = json!({
+            "messages": [{
+                "role": "user",
+                "content": "Already a string"
+            }]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        assert_eq!(body["messages"][0]["content"], "Already a string");
+    }
+
+    #[test]
+    fn test_normalize_request_body_strips_image_url_parts() {
+        let mut body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,..."}}
+                ]
+            }]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 2);
+        assert!(content[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert_eq!(content[1]["text"], "Describe this image");
+    }
+
+    #[test]
+    fn test_normalize_request_body_strips_images_in_subsequent_messages() {
+        let mut body = json!({
+            "messages": [
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Hello"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}}
+                ]},
+                {"role": "assistant", "content": "I cannot see images."},
+                {"role": "user", "content": "What about now?"},
+                {"role": "user", "content": [
+                    {"type": "text", "text": "Another image"},
+                    {"type": "image_url", "image_url": {"url": "https://example.com/img.png"}}
+                ]}
+            ]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+
+        // First message: image stripped, notice injected
+        let c0 = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(c0.len(), 2);
+        assert!(c0[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert_eq!(c0[1]["text"], "Hello");
+
+        // Second message: plain string, untouched
+        assert_eq!(body["messages"][1]["content"], "I cannot see images.");
+
+        // Third message: plain string, untouched
+        assert_eq!(body["messages"][2]["content"], "What about now?");
+
+        // Fourth message: image stripped, notice injected
+        let c3 = body["messages"][3]["content"].as_array().unwrap();
+        assert_eq!(c3.len(), 2);
+        assert!(c3[0]["text"].as_str().unwrap().contains("does not support vision"));
+        assert_eq!(c3[1]["text"], "Another image");
+    }
+
+    #[test]
+    fn test_normalize_request_body_no_messages_is_noop() {
+        let mut body = json!({"model": "deepseek-v3"});
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        assert_eq!(body["model"], "deepseek-v3");
+    }
+
+    #[test]
+    fn test_normalize_request_body_all_images_only_notice_remains() {
+        let mut body = json!({
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,abc"}},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,def"}}
+                ]
+            }]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        let content = body["messages"][0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 1);
+        assert!(content[0]["text"].as_str().unwrap().contains("does not support vision"));
     }
 }
