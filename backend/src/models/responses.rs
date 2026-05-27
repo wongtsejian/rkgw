@@ -42,6 +42,28 @@ pub struct ResponsesApiRequest {
     pub truncation: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub user: Option<String>,
+    /// background mode — return immediately, process asynchronously.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub background: Option<bool>,
+    /// service_tier — priority routing hint (e.g. "auto", "default").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    /// safety_identifier — provider-specific safety classification.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub safety_identifier: Option<String>,
+    /// text_format — alternative to `text` for specifying structured output via
+    /// a Pydantic model schema. Converted to `text` before processing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_format: Option<serde_json::Value>,
+    /// context_management — automatic context window management settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<serde_json::Value>,
+    /// include — list of includable fields (e.g. ["file_search_call.results"]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+    /// prompt — prompt object for prompt management.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<serde_json::Value>,
 }
 
 /// Input can be either a plain text string or an array of input items.
@@ -278,6 +300,10 @@ pub struct ResponsesApiUsage {
 pub struct InputTokensDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cached_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub audio_tokens: Option<i32>,
 }
 
 #[allow(dead_code)]
@@ -285,6 +311,10 @@ pub struct InputTokensDetails {
 pub struct OutputTokensDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_tokens: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_tokens: Option<i32>,
 }
 
 // ==================================================================================================
@@ -439,6 +469,13 @@ mod tests {
             store: None,
             truncation: None,
             user: None,
+            background: None,
+            service_tier: None,
+            safety_identifier: None,
+            text_format: None,
+            context_management: None,
+            include: None,
+            prompt: None,
         };
         let v = serde_json::to_value(&req).unwrap();
         // Only model and input should appear
@@ -553,9 +590,13 @@ mod tests {
                 total_tokens: 30,
                 input_tokens_details: Some(InputTokensDetails {
                     cached_tokens: Some(0),
+                    text_tokens: None,
+                    audio_tokens: None,
                 }),
                 output_tokens_details: Some(OutputTokensDetails {
                     reasoning_tokens: Some(0),
+                    text_tokens: None,
+                    image_tokens: None,
                 }),
             }),
             parallel_tool_calls: Some(true),
@@ -638,9 +679,13 @@ mod tests {
             total_tokens: 150,
             input_tokens_details: Some(InputTokensDetails {
                 cached_tokens: Some(80),
+                text_tokens: None,
+                audio_tokens: None,
             }),
             output_tokens_details: Some(OutputTokensDetails {
                 reasoning_tokens: Some(20),
+                text_tokens: None,
+                image_tokens: None,
             }),
         };
         let v = serde_json::to_value(&usage).unwrap();

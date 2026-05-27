@@ -401,6 +401,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let raw_request = build_openai_request(&body);

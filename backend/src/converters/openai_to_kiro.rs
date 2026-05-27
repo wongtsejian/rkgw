@@ -828,6 +828,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -887,6 +891,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -947,6 +955,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -988,6 +1000,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -1073,6 +1089,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -1176,6 +1196,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -1277,6 +1301,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
@@ -1387,6 +1415,10 @@ mod tests {
             parallel_tool_calls: None,
             reasoning_effort: None,
             response_format: None,
+            metadata: None,
+            service_tier: None,
+            web_search_options: None,
+            context_management: None,
         };
 
         let result = build_kiro_payload(&request, "conv-123", "profile-arn", &config);
