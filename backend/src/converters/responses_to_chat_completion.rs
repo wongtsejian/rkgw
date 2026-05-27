@@ -1003,6 +1003,9 @@ pub struct ResponsesStreamTransformer {
     /// Accumulated image generation results from streaming chunks.
     /// Each entry is a base64-encoded image (no data-URI prefix).
     accumulated_images: Vec<String>,
+    /// The raw finish_reason from the streaming response, used to map image
+    /// generation status correctly (e.g. content_filter → "failed").
+    finish_reason: Option<String>,
     active_function_calls: Vec<ActiveFunctionCall>,
     chunk_id: String,
     msg_id: String,
@@ -1029,6 +1032,7 @@ impl ResponsesStreamTransformer {
             message_text: String::new(),
             accumulated_annotations: Vec::new(),
             accumulated_images: Vec::new(),
+            finish_reason: None,
             active_function_calls: Vec::new(),
             chunk_id: response_id.to_string(),
             msg_id: format!("msg_{}", response_id),
@@ -1307,8 +1311,9 @@ impl ResponsesStreamTransformer {
         // and add to the output array.
         if !self.accumulated_images.is_empty() {
             let img_start_index = msg_output_index + 1 + self.active_function_calls.len() as i32;
-            let img_status = match status {
-                "incomplete" => "incomplete",
+            let img_status = match self.finish_reason.as_deref() {
+                Some("length") => "incomplete",
+                Some("content_filter") => "failed",
                 _ => "completed",
             };
             for (idx, base64_data) in self.accumulated_images.iter().enumerate() {
@@ -1713,6 +1718,7 @@ impl ResponsesStreamTransformer {
 
                 // ── Handle finish_reason ─────────────────────────────────────────
                 if let Some(reason) = finish_reason {
+                    self.finish_reason = Some(reason.to_string());
                     let status = match reason {
                         "length" | "content_filter" => "incomplete",
                         _ => "completed",
@@ -1750,6 +1756,10 @@ impl ResponsesStreamTransformer {
             return events;
         }
 
+        // Stream ended without explicit finish_reason — treat as incomplete.
+        if self.finish_reason.is_none() {
+            self.finish_reason = Some("length".to_string());
+        }
         self.emit_completion_events(&mut events, "incomplete", None);
         events
     }
@@ -4227,6 +4237,62 @@ mod tests {
         assert_eq!(img_items.len(), 1);
         assert_eq!(img_items[0]["result"], "iVBORw0KGgo=");
         assert_eq!(img_items[0]["status"], "completed");
+    }
+
+    /// #10: Streaming transformer maps content_filter finish_reason to image status "failed".
+    #[test]
+    fn test_stream_image_generation_content_filter() {
+        let mut transformer = ResponsesStreamTransformer::new("resp_cf", "gpt-4o");
+
+        // Chunk 1: role delta + content + image
+        let chunk1 = json!({
+            "id": "chatcmpl-cf-stream",
+            "created": 1700000000,
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": "Image blocked:",
+                    "images": [
+                        {"image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}, "type": "image_url"}
+                    ]
+                },
+                "finish_reason": null
+            }]
+        });
+        transformer.transform_chunk(&chunk1);
+
+        // Chunk 2: finish_reason content_filter triggers completion with "failed" image status.
+        let chunk2 = json!({
+            "id": "chatcmpl-cf-stream",
+            "created": 1700000000,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "content_filter"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        });
+        let events = transformer.transform_chunk(&chunk2);
+
+        // Verify the completed response contains image_generation_call with status "failed".
+        let completed_event = events
+            .iter()
+            .find(|e| e.contains("response.completed"))
+            .unwrap();
+        let data_line = completed_event
+            .lines()
+            .find(|l| l.starts_with("data: "))
+            .unwrap();
+        let data: Value = serde_json::from_str(&data_line[6..]).unwrap();
+        let output = data["response"]["output"].as_array().unwrap();
+
+        let img_items: Vec<&Value> = output
+            .iter()
+            .filter(|o| o["type"] == "image_generation_call")
+            .collect();
+        assert_eq!(img_items.len(), 1);
+        assert_eq!(img_items[0]["status"], "failed");
     }
 
     /// #10: Response without images should not produce any image_generation_call items.
