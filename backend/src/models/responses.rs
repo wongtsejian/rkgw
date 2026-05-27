@@ -233,6 +233,9 @@ pub enum ResponseOutputItem {
     /// A reasoning item (thinking tokens from reasoning models).
     #[serde(rename = "reasoning")]
     Reasoning(ResponseOutputMessage),
+    /// An image generation call (e.g. DALL-E produced images).
+    #[serde(rename = "image_generation_call")]
+    ImageGenerationCall(ResponseImageGenerationCall),
 }
 
 /// An assistant message in the output array.
@@ -264,6 +267,31 @@ pub struct ResponseOutputText {
     pub text: String,
     #[serde(default)]
     pub annotations: Vec<serde_json::Value>,
+}
+
+/// An image generation output item.
+///
+/// When a model generates images (e.g. DALL-E), the Responses API represents
+/// each generated image as an `image_generation_call` output item with a
+/// base64-encoded `result`.
+///
+/// Example:
+/// ```json
+/// {
+///   "type": "image_generation_call",
+///   "id": "img_abc123",
+///   "status": "completed",
+///   "result": "iVBORw0KGgo..."
+/// }
+/// ```
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResponseImageGenerationCall {
+    pub id: String,
+    pub status: String, // "completed" | "incomplete" | "in_progress" | "failed"
+    /// Base64-encoded image data (no data-URI prefix).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<String>,
 }
 
 /// A function/tool call in the output array.
@@ -857,6 +885,42 @@ mod tests {
     }
 
     // ---- InputFunctionCall / InputFunctionCallOutput round-trips ----
+
+    #[test]
+    fn test_output_item_image_generation_call() {
+        let item = ResponseOutputItem::ImageGenerationCall(ResponseImageGenerationCall {
+            id: "img_abc".to_string(),
+            status: "completed".to_string(),
+            result: Some("iVBORw0KGgo=".to_string()),
+        });
+        let v = serde_json::to_value(&item).unwrap();
+        assert_eq!(v["type"], "image_generation_call");
+        assert_eq!(v["id"], "img_abc");
+        assert_eq!(v["status"], "completed");
+        assert_eq!(v["result"], "iVBORw0KGgo=");
+
+        // Round-trip
+        let back: ResponseOutputItem = serde_json::from_value(v).unwrap();
+        if let ResponseOutputItem::ImageGenerationCall(img) = back {
+            assert_eq!(img.id, "img_abc");
+            assert_eq!(img.result.as_deref(), Some("iVBORw0KGgo="));
+        } else {
+            panic!("expected ImageGenerationCall variant");
+        }
+    }
+
+    #[test]
+    fn test_output_item_image_generation_call_no_result() {
+        let item = ResponseOutputItem::ImageGenerationCall(ResponseImageGenerationCall {
+            id: "img_inprogress".to_string(),
+            status: "in_progress".to_string(),
+            result: None,
+        });
+        let v = serde_json::to_value(&item).unwrap();
+        assert_eq!(v["type"], "image_generation_call");
+        // result should be omitted when None.
+        assert!(v.get("result").is_none());
+    }
 
     #[test]
     fn test_input_function_call_round_trip() {
