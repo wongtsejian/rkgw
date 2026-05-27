@@ -223,6 +223,10 @@ pub fn anthropic_to_openai(req: &AnthropicMessagesRequest) -> ChatCompletionRequ
         parallel_tool_calls,
         reasoning_effort,
         response_format: None,
+        metadata: None,
+        service_tier: None,
+        web_search_options: None,
+        context_management: None,
     }
 }
 

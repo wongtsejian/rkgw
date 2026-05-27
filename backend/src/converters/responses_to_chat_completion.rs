@@ -5,7 +5,8 @@
 use serde_json::{json, Value};
 
 use crate::models::openai::{
-    ChatCompletionRequest, ChatMessage, FunctionCall, FunctionTool, Tool, ToolCall, ToolFunction,
+    ChatCompletionRequest, ChatMessage, FunctionCall, FunctionTool, ServerSideTool, Tool, ToolCall,
+    ToolFunction,
 };
 use crate::models::responses::{ResponsesApiInput, ResponsesApiRequest};
 
@@ -19,7 +20,11 @@ use crate::models::responses::{ResponsesApiInput, ResponsesApiRequest};
 /// - `completion_tokens` → `output_tokens`
 /// - `total_tokens` → `total_tokens`
 /// - `prompt_tokens_details.cached_tokens` → `input_tokens_details.cached_tokens`
+/// - `prompt_tokens_details.text_tokens` → `input_tokens_details.text_tokens`
+/// - `prompt_tokens_details.audio_tokens` → `input_tokens_details.audio_tokens`
 /// - `completion_tokens_details.reasoning_tokens` → `output_tokens_details.reasoning_tokens`
+/// - `completion_tokens_details.text_tokens` → `output_tokens_details.text_tokens`
+/// - `completion_tokens_details.image_tokens` → `output_tokens_details.image_tokens`
 fn map_chat_usage_to_responses(usage: &Value) -> Value {
     let input_tokens = usage
         .get("prompt_tokens")
@@ -40,22 +45,46 @@ fn map_chat_usage_to_responses(usage: &Value) -> Value {
         "total_tokens": total_tokens
     });
 
-    // Map prompt_tokens_details.cached_tokens → input_tokens_details.cached_tokens
+    // Map prompt_tokens_details → input_tokens_details
     if let Some(ptd) = usage.get("prompt_tokens_details") {
-        let cached = ptd
-            .get("cached_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        usage_obj["input_tokens_details"] = json!({ "cached_tokens": cached });
+        let mut input_details = json!({});
+        let mut has_any = false;
+        if let Some(v) = ptd.get("cached_tokens").and_then(|v| v.as_i64()) {
+            input_details["cached_tokens"] = json!(v);
+            has_any = true;
+        }
+        if let Some(v) = ptd.get("text_tokens").and_then(|v| v.as_i64()) {
+            input_details["text_tokens"] = json!(v);
+            has_any = true;
+        }
+        if let Some(v) = ptd.get("audio_tokens").and_then(|v| v.as_i64()) {
+            input_details["audio_tokens"] = json!(v);
+            has_any = true;
+        }
+        if has_any {
+            usage_obj["input_tokens_details"] = input_details;
+        }
     }
 
-    // Map completion_tokens_details.reasoning_tokens → output_tokens_details.reasoning_tokens
+    // Map completion_tokens_details → output_tokens_details
     if let Some(ctd) = usage.get("completion_tokens_details") {
-        let reasoning = ctd
-            .get("reasoning_tokens")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        usage_obj["output_tokens_details"] = json!({ "reasoning_tokens": reasoning });
+        let mut output_details = json!({});
+        let mut has_any = false;
+        if let Some(v) = ctd.get("reasoning_tokens").and_then(|v| v.as_i64()) {
+            output_details["reasoning_tokens"] = json!(v);
+            has_any = true;
+        }
+        if let Some(v) = ctd.get("text_tokens").and_then(|v| v.as_i64()) {
+            output_details["text_tokens"] = json!(v);
+            has_any = true;
+        }
+        if let Some(v) = ctd.get("image_tokens").and_then(|v| v.as_i64()) {
+            output_details["image_tokens"] = json!(v);
+            has_any = true;
+        }
+        if has_any {
+            usage_obj["output_tokens_details"] = output_details;
+        }
     }
 
     usage_obj
@@ -95,10 +124,15 @@ fn convert_single_content_part(part: &Value) -> Value {
         // input_text / output_text → text
         "input_text" | "output_text" => {
             let text = part.get("text").and_then(|v| v.as_str()).unwrap_or("");
-            json!({
+            let mut result = json!({
                 "type": "text",
                 "text": text
-            })
+            });
+            // Forward cache_control if present (Anthropic prompt caching).
+            if let Some(cc) = part.get("cache_control") {
+                result["cache_control"] = cc.clone();
+            }
+            result
         }
         // input_image → image_url
         // Responses API: {"type": "input_image", "image_url": "data:..."}
@@ -109,14 +143,138 @@ fn convert_single_content_part(part: &Value) -> Value {
             let mut image_url_obj = json!({ "url": url });
             if let Some(d) = detail {
                 image_url_obj["detail"] = json!(d);
+            } else {
+                image_url_obj["detail"] = json!("auto");
             }
-            json!({
+            let mut result = json!({
                 "type": "image_url",
                 "image_url": image_url_obj
-            })
+            });
+            // Forward cache_control if present (Anthropic prompt caching).
+            if let Some(cc) = part.get("cache_control") {
+                result["cache_control"] = cc.clone();
+            }
+            result
+        }
+        // input_file → file
+        // Responses API: {"type": "input_file", "file_id": "...", "file_data": "..."}
+        // Chat Completions: {"type": "file", "file": {"file_id": "...", "file_data": "..."}}
+        "input_file" => {
+            let file_id = part
+                .get("file_id")
+                .or_else(|| part.get("file_url")) // file_url as fallback
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let file_data = part.get("file_data").and_then(|v| v.as_str()).unwrap_or("");
+            let mut file_dict = json!({});
+            if !file_id.is_empty() {
+                file_dict["file_id"] = json!(file_id);
+            }
+            if !file_data.is_empty() {
+                file_dict["file_data"] = json!(file_data);
+            }
+            let mut result = json!({
+                "type": "file",
+                "file": file_dict
+            });
+            if let Some(cc) = part.get("cache_control") {
+                result["cache_control"] = cc.clone();
+            }
+            result
         }
         // Already in Chat Completions format or unknown type — pass through.
         _ => part.clone(),
+    }
+}
+
+// ==================================================================================================
+// Helper: normalize tool_choice from various formats
+// ==================================================================================================
+
+/// Normalize `tool_choice` from various formats to OpenAI Chat Completion format.
+///
+/// Handles:
+/// - String values: "auto", "none", "required" → pass through as-is
+/// - Dict with type only (Cursor IDE format):
+///   - `{"type": "auto"}` → `"auto"`
+///   - `{"type": "none"}` → `"none"`
+///   - `{"type": "required"}` / `{"type": "tool"}` / `{"type": "any"}` → `"required"`
+/// - Dict with function (OpenAI format):
+///   - `{"type": "function", "function": {"name": "..."}}` → pass through as-is
+fn normalize_tool_choice(tool_choice: &Value) -> Value {
+    match tool_choice {
+        Value::String(s) => json!(s),
+        Value::Object(map) => {
+            let tc_type = map.get("type").and_then(|v| v.as_str()).unwrap_or("");
+
+            // If it has a function with name, it's standard OpenAI format — pass through.
+            if let Some(func) = map.get("function") {
+                if func.get("name").is_some() {
+                    return tool_choice.clone();
+                }
+            }
+
+            // Handle Cursor IDE dict formats without function name.
+            match tc_type {
+                "auto" => json!("auto"),
+                "none" => json!("none"),
+                "required" | "tool" | "any" => json!("required"),
+                "function" => json!("required"), // function without name → fall back to required
+                _ => tool_choice.clone(),        // unknown format — pass through
+            }
+        }
+        _ => tool_choice.clone(),
+    }
+}
+
+// ==================================================================================================
+// Helper: normalize function_call_output to string content
+// ==================================================================================================
+
+/// Normalize Responses API `function_call_output.output` into a string suitable
+/// for a Chat Completions tool message `content` field.
+///
+/// OpenAI Responses API typically uses: `output: string`
+/// Some clients/adapters send: `output: [{"type": "input_text", "text": "..."}]`
+/// or: `output: {"key": "value"}` (dict)
+///
+/// Returns a JSON string representation for non-string outputs.
+fn normalize_function_call_output(output: &Value) -> String {
+    match output {
+        Value::String(s) => s.clone(),
+        Value::Null => String::new(),
+        Value::Array(parts) => {
+            // Some adapters represent tool output as a list of "input_*" parts.
+            let mut text_acc = Vec::new();
+            let mut has_images = false;
+
+            for part in parts {
+                if let Some(part_type) = part.get("type").and_then(|v| v.as_str()) {
+                    match part_type {
+                        "input_text" | "output_text" | "text" => {
+                            if let Some(txt) = part.get("text").and_then(|v| v.as_str()) {
+                                if !txt.is_empty() {
+                                    text_acc.push(txt.to_string());
+                                }
+                            }
+                        }
+                        "input_image" | "image_url" => {
+                            has_images = true;
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            if !text_acc.is_empty() && !has_images {
+                return text_acc.join("");
+            }
+
+            // Fall back to JSON serialization for complex outputs.
+            serde_json::to_string(output).unwrap_or_else(|_| output.to_string())
+        }
+        // Dict, number, bool → JSON-serialize.
+        _ => serde_json::to_string(output).unwrap_or_else(|_| output.to_string()),
     }
 }
 
@@ -136,12 +294,16 @@ fn convert_single_content_part(part: &Value) -> Value {
 ///   - `{type: "function_call_output", ...}` → tool message
 /// - `max_output_tokens` → `max_tokens`
 /// - `tools` (flat) → `tools` (nested under `function`)
-/// - `tool_choice` → `tool_choice` (pass through)
+/// - `tool_choice` → `tool_choice` (with dict normalization for Cursor IDE)
 /// - `temperature`, `top_p`, `stream`, `parallel_tool_calls`, `user` → pass through
 /// - `text.format.type == "json_schema"` → `response_format = {"type": "json_schema", "json_schema": {...}}`
 /// - `text.format.type == "json_object"` → `response_format = {"type": "json_object"}`
 /// - `reasoning.effort` → `reasoning_effort` (string)
+/// - `reasoning.summary` → preserve full `reasoning` dict when summary is set
+/// - `text_format` → converted to `text.format` before processing
+/// - `web_search_preview`/`web_search` tools → `web_search_options` + `ServerSideTool`
 /// - If `stream` is true, set `stream_options = {"include_usage": true}`
+/// - `metadata`, `service_tier`, `context_management` → pass through
 pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletionRequest {
     tracing::debug!(
         model = %req.model,
@@ -198,18 +360,30 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                 let name = item.get("name").and_then(|v| v.as_str()).unwrap_or("");
                 let arguments = item.get("arguments").and_then(|v| v.as_str()).unwrap_or("");
 
+                let new_tool_call = ToolCall {
+                    id: call_id.to_string(),
+                    tool_type: "function".to_string(),
+                    function: FunctionCall {
+                        name: name.to_string(),
+                        arguments: arguments.to_string(),
+                    },
+                };
+
+                // Merge consecutive function_call items into a single assistant message.
+                // This is critical for Anthropic which requires all tool_use blocks in
+                // one assistant message immediately followed by tool_result blocks.
+                if let Some(last_msg) = messages.last_mut() {
+                    if last_msg.role == "assistant" && last_msg.tool_calls.is_some() {
+                        last_msg.tool_calls.as_mut().unwrap().push(new_tool_call);
+                        continue;
+                    }
+                }
+
                 messages.push(ChatMessage {
                     role: "assistant".to_string(),
                     content: None,
                     name: None,
-                    tool_calls: Some(vec![ToolCall {
-                        id: call_id.to_string(),
-                        tool_type: "function".to_string(),
-                        function: FunctionCall {
-                            name: name.to_string(),
-                            arguments: arguments.to_string(),
-                        },
-                    }]),
+                    tool_calls: Some(vec![new_tool_call]),
                     tool_call_id: None,
                 });
             }
@@ -222,15 +396,22 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                     .unwrap_or_else(|| {
                         tracing::warn!(
                             item_type = "function_call_output",
-                            "Input item missing required call_id field; upstream provider may reject"
+                            "Input item missing required call_id field; skipping"
                         );
                         ""
                     });
-                let output = item.get("output").and_then(|v| v.as_str()).unwrap_or("");
+
+                // Skip tool output with empty call_id — can't create a valid tool message.
+                if call_id.is_empty() {
+                    continue;
+                }
+
+                let output_raw = item.get("output").cloned().unwrap_or(Value::Null);
+                let output = normalize_function_call_output(&output_raw);
 
                 messages.push(ChatMessage {
                     role: "tool".to_string(),
-                    content: Some(Value::String(output.to_string())),
+                    content: Some(Value::String(output)),
                     name: None,
                     tool_calls: None,
                     tool_call_id: Some(call_id.to_string()),
@@ -242,12 +423,22 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                     "Skipping reasoning input item when converting Responses API history"
                 );
             }
+            // Skip other internal item types that don't map to chat messages.
+            Some("web_search_call") | Some("computer_call_output") | Some("tool_result") => {
+                tracing::debug!(
+                    item_type = item_type.unwrap_or("unknown"),
+                    "Skipping non-message input item type during conversion"
+                );
+            }
             _ => {
                 if let Some(t) = item_type {
-                    tracing::warn!(
-                        item_type = %t,
-                        "Unrecognized Responses API input item type; converting as regular message"
-                    );
+                    // Only warn for truly unrecognized types, not for regular messages.
+                    if t != "message" {
+                        tracing::warn!(
+                            item_type = %t,
+                            "Unrecognized Responses API input item type; converting as regular message"
+                        );
+                    }
                 }
                 let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("user");
                 let mapped_role = match role {
@@ -256,9 +447,14 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
                 };
                 let content = item.get("content").cloned().unwrap_or(Value::Null);
 
+                // Skip items with null content — they can't form valid messages.
+                if content.is_null() {
+                    continue;
+                }
+
                 // Convert Responses API content parts to Chat Completions format.
-                // Responses API uses: input_text, input_image
-                // Chat Completions uses: text, image_url
+                // Responses API uses: input_text, input_image, input_file
+                // Chat Completions uses: text, image_url, file
                 let converted_content = convert_responses_content_parts(&content);
 
                 messages.push(ChatMessage {
@@ -273,46 +469,92 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
     }
 
     // Convert tools from flat structure to nested Chat Completions structure.
-    // H3: Warn when non-function tools are dropped.
-    // H4: Map strict field during tool conversion.
+    // Also extract web_search_options from web_search_preview/web_search tools.
+    let mut web_search_options: Option<Value> = None;
     let tools: Option<Vec<Tool>> = req.tools.as_ref().map(|tools| {
-        let total_count = tools.len();
         let converted: Vec<Tool> = tools
             .iter()
             .filter_map(|t| {
-                if t.tool_type != "function" {
-                    tracing::warn!(
-                        tool_type = %t.tool_type,
-                        name = ?t.name,
-                        "Dropping non-function tool (not supported by Chat Completions API)"
-                    );
-                    None
-                } else {
-                    Some(Tool::Function(FunctionTool {
-                        tool_type: "function".to_string(),
-                        function: ToolFunction {
-                            name: t.name.clone().unwrap_or_default(),
-                            description: t.description.clone(),
-                            parameters: t.parameters.clone(),
-                            strict: t.strict,
-                        },
-                    }))
+                match t.tool_type.as_str() {
+                    "web_search_preview" | "web_search" => {
+                        // Extract web_search_options from the tool.
+                        let search_context_size = t
+                            .extra
+                            .get("search_context_size")
+                            .cloned()
+                            .unwrap_or(json!("medium"));
+                        let user_location = t.extra.get("user_location").cloned();
+                        let mut wso = json!({ "search_context_size": search_context_size });
+                        if let Some(ul) = user_location {
+                            wso["user_location"] = ul;
+                        }
+                        web_search_options = Some(wso);
+
+                        // Also preserve as a ServerSideTool so the provider can see it.
+                        Some(Tool::ServerSide(ServerSideTool {
+                            tool_type: t.tool_type.clone(),
+                            extra: t.extra.clone(),
+                        }))
+                    }
+                    "mcp" => {
+                        // Pass MCP tools through as ServerSideTool.
+                        Some(Tool::ServerSide(ServerSideTool {
+                            tool_type: t.tool_type.clone(),
+                            extra: t.extra.clone(),
+                        }))
+                    }
+                    "function" => {
+                        let mut ft = FunctionTool {
+                            tool_type: "function".to_string(),
+                            function: ToolFunction {
+                                name: t.name.clone().unwrap_or_default(),
+                                description: t.description.clone(),
+                                parameters: t.parameters.clone(),
+                                strict: t.strict,
+                            },
+                        };
+                        // Ensure parameters has "type": "object" as required by some providers.
+                        if let Some(ref mut params) = ft.function.parameters {
+                            if params.get("type").is_none() {
+                                if let Some(obj) = params.as_object_mut() {
+                                    obj.insert("type".to_string(), json!("object"));
+                                }
+                            }
+                        } else {
+                            ft.function.parameters = Some(json!({"type": "object"}));
+                        }
+                        Some(Tool::Function(ft))
+                    }
+                    _ => {
+                        // Pass other tool types through as ServerSideTool rather than dropping them.
+                        tracing::debug!(
+                            tool_type = %t.tool_type,
+                            name = ?t.name,
+                            "Passing through non-function tool as ServerSideTool"
+                        );
+                        Some(Tool::ServerSide(ServerSideTool {
+                            tool_type: t.tool_type.clone(),
+                            extra: t.extra.clone(),
+                        }))
+                    }
                 }
             })
             .collect();
-        let dropped = total_count - converted.len();
-        if dropped > 0 {
-            tracing::warn!(
-                dropped_count = dropped,
-                total_count = total_count,
-                "Non-function tools were dropped; model will not be able to call them"
-            );
-        }
+        // Note: we no longer drop tools, so no warning about dropped tools.
         converted
     });
 
     // Map text.format → response_format
-    let response_format = req.text.as_ref().and_then(|text| {
+    // Also support text_format parameter (alternative to text).
+    let effective_text = if let Some(ref tf) = req.text_format {
+        // Convert text_format (Pydantic model schema) to text.format structure.
+        // text_format is expected to be a dict with type, name, schema, strict fields.
+        Some(json!({ "format": tf.clone() }))
+    } else {
+        req.text.clone()
+    };
+
+    let response_format = effective_text.as_ref().and_then(|text| {
         let fmt = text.get("format")?;
         let fmt_type = fmt.get("type").and_then(|v| v.as_str())?;
         match fmt_type {
@@ -338,11 +580,18 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
         }
     });
 
-    // Map reasoning.effort → reasoning_effort
+    // Map reasoning → reasoning_effort
+    // When reasoning.summary is set, preserve the full dict for the Responses API bridge;
+    // otherwise use the effort string for chat completion.
     let reasoning_effort = req.reasoning.as_ref().and_then(|r| {
-        r.get("effort")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
+        if r.get("summary").is_some() {
+            // Full reasoning dict with summary — pass as JSON string.
+            serde_json::to_string(r).ok()
+        } else {
+            r.get("effort")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        }
     });
 
     // If stream is true, include stream_options with include_usage.
@@ -354,6 +603,9 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
     } else {
         None
     };
+
+    // Normalize tool_choice (handles Cursor IDE dict formats).
+    let tool_choice = req.tool_choice.as_ref().map(|tc| normalize_tool_choice(tc));
 
     ChatCompletionRequest {
         model: req.model.clone(),
@@ -370,7 +622,7 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
         presence_penalty: None,
         frequency_penalty: None,
         tools,
-        tool_choice: req.tool_choice.clone(),
+        tool_choice,
         stream_options,
         logit_bias: None,
         logprobs: None,
@@ -380,6 +632,10 @@ pub fn responses_to_chat_completion(req: &ResponsesApiRequest) -> ChatCompletion
         parallel_tool_calls: req.parallel_tool_calls,
         reasoning_effort,
         response_format,
+        metadata: req.metadata.clone(),
+        service_tier: req.service_tier.clone(),
+        web_search_options,
+        context_management: req.context_management.clone(),
     }
 }
 
@@ -506,6 +762,35 @@ pub fn chat_completion_to_responses_api(
         }
     }
 
+    // Extract annotations from the message (e.g., url_citation from web search).
+    let annotations = message
+        .and_then(|m| m.get("annotations"))
+        .and_then(|a| a.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|ann| {
+                    let ann_type = ann.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    match ann_type {
+                        "url_citation" => {
+                            if let Some(uc) = ann.get("url_citation") {
+                                Some(json!({
+                                    "type": "url_citation",
+                                    "start_index": uc.get("start_index").unwrap_or(&json!(0)),
+                                    "end_index": uc.get("end_index").unwrap_or(&json!(0)),
+                                    "url": uc.get("url").unwrap_or(&json!("")),
+                                    "title": uc.get("title").unwrap_or(&json!(""))
+                                }))
+                            } else {
+                                None
+                            }
+                        }
+                        _ => Some(ann.clone()), // pass through unknown annotation types
+                    }
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
     // Always emit a message output item.
     // When content is null/empty and there are tool_calls, emit empty text
     // (Codex CLI expects the message content to always be an array with output_text).
@@ -517,7 +802,7 @@ pub fn chat_completion_to_responses_api(
         "content": [{
             "type": "output_text",
             "text": text_content,
-            "annotations": []
+            "annotations": annotations
         }]
     }));
 
@@ -658,6 +943,8 @@ pub struct ResponsesStreamTransformer {
     had_reasoning: bool,
     reasoning_text: String,
     message_text: String,
+    /// Accumulated annotations from streaming chunks (e.g., url_citation from web search).
+    accumulated_annotations: Vec<Value>,
     active_function_calls: Vec<ActiveFunctionCall>,
     chunk_id: String,
     msg_id: String,
@@ -682,6 +969,7 @@ impl ResponsesStreamTransformer {
             had_reasoning: false,
             reasoning_text: String::new(),
             message_text: String::new(),
+            accumulated_annotations: Vec::new(),
             active_function_calls: Vec::new(),
             chunk_id: response_id.to_string(),
             msg_id: format!("msg_{}", response_id),
@@ -872,6 +1160,11 @@ impl ResponsesStreamTransformer {
         }
 
         // Emit response.content_part.done (message)
+        let annotations = if self.accumulated_annotations.is_empty() {
+            json!([])
+        } else {
+            json!(self.accumulated_annotations)
+        };
         events.push(format_sse_event(
             "response.content_part.done",
             &json!({
@@ -881,7 +1174,7 @@ impl ResponsesStreamTransformer {
                 "part": {
                     "type": "output_text",
                     "text": &self.message_text,
-                    "annotations": []
+                    "annotations": annotations
                 }
             }),
         ));
@@ -900,7 +1193,7 @@ impl ResponsesStreamTransformer {
                     "content": [{
                         "type": "output_text",
                         "text": &self.message_text,
-                        "annotations": []
+                        "annotations": annotations
                     }]
                 }
             }),
@@ -931,7 +1224,11 @@ impl ResponsesStreamTransformer {
             "content": [{
                 "type": "output_text",
                 "text": &self.message_text,
-                "annotations": []
+                "annotations": if self.accumulated_annotations.is_empty() {
+                    json!([])
+                } else {
+                    json!(self.accumulated_annotations)
+                }
             }]
         }));
 
@@ -1149,6 +1446,33 @@ impl ResponsesStreamTransformer {
                         }
                     }
 
+                    // ── 3.5. Annotations ────────────────────────────────────────────
+                    // Accumulate annotations from streaming chunks (e.g., url_citation).
+                    if let Some(anns) = delta.get("annotations").and_then(|a| a.as_array()) {
+                        for ann in anns {
+                            let ann_type = ann.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                            let transformed = match ann_type {
+                                "url_citation" => {
+                                    if let Some(uc) = ann.get("url_citation") {
+                                        Some(json!({
+                                            "type": "url_citation",
+                                            "start_index": uc.get("start_index").unwrap_or(&json!(0)),
+                                            "end_index": uc.get("end_index").unwrap_or(&json!(0)),
+                                            "url": uc.get("url").unwrap_or(&json!("")),
+                                            "title": uc.get("title").unwrap_or(&json!(""))
+                                        }))
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => Some(ann.clone()),
+                            };
+                            if let Some(t) = transformed {
+                                self.accumulated_annotations.push(t);
+                            }
+                        }
+                    }
+
                     // ── 4. Tool calls delta ───────────────────────────────────────
                     if let Some(tool_calls) = delta.get("tool_calls").and_then(|t| t.as_array()) {
                         for tc in tool_calls {
@@ -1340,6 +1664,13 @@ mod tests {
             store: None,
             truncation: None,
             user: None,
+            background: None,
+            service_tier: None,
+            safety_identifier: None,
+            text_format: None,
+            context_management: None,
+            include: None,
+            prompt: None,
         }
     }
 
@@ -3180,5 +3511,356 @@ mod tests {
         // A chunk with no choices should produce no events at all
         // (initial events are only emitted when there's actual content to process).
         assert!(events.is_empty());
+    }
+
+    // ==============================================================================================
+    // NEW TESTS: Fixes for LiteLLM discrepancies
+    // ==============================================================================================
+
+    /// #1: tool_choice dict normalization (Cursor IDE format).
+    #[test]
+    fn test_tool_choice_dict_auto() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            tool_choice: Some(json!({"type": "auto"})),
+            ..req
+        });
+        assert_eq!(result.tool_choice, Some(json!("auto")));
+    }
+
+    #[test]
+    fn test_tool_choice_dict_none() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            tool_choice: Some(json!({"type": "none"})),
+            ..req
+        });
+        assert_eq!(result.tool_choice, Some(json!("none")));
+    }
+
+    #[test]
+    fn test_tool_choice_dict_required() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            tool_choice: Some(json!({"type": "required"})),
+            ..req
+        });
+        assert_eq!(result.tool_choice, Some(json!("required")));
+    }
+
+    #[test]
+    fn test_tool_choice_dict_tool() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            tool_choice: Some(json!({"type": "tool"})),
+            ..req
+        });
+        // "tool" without a specific function name → "required"
+        assert_eq!(result.tool_choice, Some(json!("required")));
+    }
+
+    #[test]
+    fn test_tool_choice_dict_function_with_name() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            tool_choice: Some(json!({"type": "function", "function": {"name": "get_weather"}})),
+            ..req
+        });
+        // Standard OpenAI format with function name → pass through
+        assert_eq!(
+            result.tool_choice,
+            Some(json!({"type": "function", "function": {"name": "get_weather"}}))
+        );
+    }
+
+    /// #3: input_file content part conversion.
+    #[test]
+    fn test_input_file_conversion() {
+        let part = json!({
+            "type": "input_file",
+            "file_id": "file-abc123",
+            "file_data": "base64data"
+        });
+        let converted = convert_single_content_part(&part);
+        assert_eq!(converted["type"], "file");
+        assert_eq!(converted["file"]["file_id"], "file-abc123");
+        assert_eq!(converted["file"]["file_data"], "base64data");
+    }
+
+    #[test]
+    fn test_input_file_with_file_url_fallback() {
+        let part = json!({
+            "type": "input_file",
+            "file_url": "https://example.com/file.pdf"
+        });
+        let converted = convert_single_content_part(&part);
+        assert_eq!(converted["type"], "file");
+        // file_url is used as fallback for file_id
+        assert_eq!(converted["file"]["file_id"], "https://example.com/file.pdf");
+    }
+
+    /// #4: function_call_output normalization for non-string outputs.
+    #[test]
+    fn test_function_call_output_dict_normalized() {
+        let output = json!({"result": "success", "count": 42});
+        let normalized = normalize_function_call_output(&output);
+        // Should be JSON-serialized
+        let parsed: serde_json::Value = serde_json::from_str(&normalized).unwrap();
+        assert_eq!(parsed["result"], "success");
+        assert_eq!(parsed["count"], 42);
+    }
+
+    #[test]
+    fn test_function_call_output_array_of_text_parts() {
+        let output = json!([
+            {"type": "input_text", "text": "Hello "},
+            {"type": "input_text", "text": "World"}
+        ]);
+        let normalized = normalize_function_call_output(&output);
+        assert_eq!(normalized, "Hello World");
+    }
+
+    #[test]
+    fn test_function_call_output_null() {
+        let output = Value::Null;
+        let normalized = normalize_function_call_output(&output);
+        assert_eq!(normalized, "");
+    }
+
+    /// #5: Consecutive function_call items merged into single assistant message.
+    #[test]
+    fn test_consecutive_function_calls_merged() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({"role": "user", "content": "Use both tools"}),
+            json!({
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "tool_a",
+                "arguments": "{}"
+            }),
+            json!({
+                "type": "function_call",
+                "call_id": "call_2",
+                "name": "tool_b",
+                "arguments": "{}"
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let result = responses_to_chat_completion(&req);
+
+        // Should have 2 messages: user + assistant (with 2 tool_calls)
+        assert_eq!(result.messages.len(), 2);
+        assert_eq!(result.messages[0].role, "user");
+        assert_eq!(result.messages[1].role, "assistant");
+        let tool_calls = result.messages[1].tool_calls.as_ref().unwrap();
+        assert_eq!(tool_calls.len(), 2);
+        assert_eq!(tool_calls[0].function.name, "tool_a");
+        assert_eq!(tool_calls[1].function.name, "tool_b");
+    }
+
+    /// #7: Full usage detail mapping.
+    #[test]
+    fn test_usage_with_all_details() {
+        let usage = json!({
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+            "prompt_tokens_details": {
+                "cached_tokens": 30,
+                "text_tokens": 60,
+                "audio_tokens": 10
+            },
+            "completion_tokens_details": {
+                "reasoning_tokens": 15,
+                "text_tokens": 30,
+                "image_tokens": 5
+            }
+        });
+        let result = map_chat_usage_to_responses(&usage);
+        assert_eq!(result["input_tokens"], 100);
+        assert_eq!(result["output_tokens"], 50);
+        assert_eq!(result["total_tokens"], 150);
+        assert_eq!(result["input_tokens_details"]["cached_tokens"], 30);
+        assert_eq!(result["input_tokens_details"]["text_tokens"], 60);
+        assert_eq!(result["input_tokens_details"]["audio_tokens"], 10);
+        assert_eq!(result["output_tokens_details"]["reasoning_tokens"], 15);
+        assert_eq!(result["output_tokens_details"]["text_tokens"], 30);
+        assert_eq!(result["output_tokens_details"]["image_tokens"], 5);
+    }
+
+    /// #9: Non-streaming response extracts annotations from message.
+    #[test]
+    fn test_chat_completion_to_responses_with_annotations() {
+        let chat_resp = json!({
+            "id": "chatcmpl-123",
+            "created": 1700000000,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Paris is the capital.",
+                    "annotations": [{
+                        "type": "url_citation",
+                        "url_citation": {
+                            "start_index": 0,
+                            "end_index": 5,
+                            "url": "https://example.com",
+                            "title": "Example"
+                        }
+                    }]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "total_tokens": 15
+            }
+        });
+        let request_input = ResponsesApiInput::Text("What is the capital?".to_string());
+        let original_request = make_req("gpt-4o", request_input.clone());
+        let result = chat_completion_to_responses_api(&chat_resp, request_input, &original_request);
+
+        // The output message should have annotations
+        let output = result["output"].as_array().unwrap();
+        let msg = output
+            .iter()
+            .find(|item| item["type"] == "message")
+            .unwrap();
+        let content = msg["content"].as_array().unwrap();
+        let annotations = content[0]["annotations"].as_array().unwrap();
+        assert_eq!(annotations.len(), 1);
+        assert_eq!(annotations[0]["type"], "url_citation");
+        assert_eq!(annotations[0]["url"], "https://example.com");
+    }
+
+    /// #11: text_format parameter converted to text.format.
+    #[test]
+    fn test_text_format_parameter() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            text_format: Some(json!({
+                "type": "json_schema",
+                "name": "my_schema",
+                "schema": {"type": "object"},
+                "strict": true
+            })),
+            ..req
+        });
+        // Should produce a response_format with json_schema
+        let rf = result.response_format.as_ref().unwrap();
+        assert_eq!(rf["type"], "json_schema");
+        assert_eq!(rf["json_schema"]["name"], "my_schema");
+    }
+
+    /// #13: metadata passthrough.
+    #[test]
+    fn test_metadata_passthrough() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            metadata: Some(json!({"user_id": "abc"})),
+            ..req
+        });
+        assert_eq!(result.metadata, Some(json!({"user_id": "abc"})));
+    }
+
+    /// #14: service_tier passthrough.
+    #[test]
+    fn test_service_tier_passthrough() {
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("hi".to_string()));
+        let result = responses_to_chat_completion(&ResponsesApiRequest {
+            service_tier: Some("auto".to_string()),
+            ..req
+        });
+        assert_eq!(result.service_tier, Some("auto".to_string()));
+    }
+
+    /// #15: Null content items are skipped.
+    #[test]
+    fn test_null_content_items_skipped() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({"role": "user", "content": "Hello"}),
+            json!({"role": "assistant", "content": null}),
+            json!({"role": "user", "content": "Follow-up"}),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let result = responses_to_chat_completion(&req);
+        // The assistant message with null content should be skipped
+        assert_eq!(result.messages.len(), 2);
+        assert_eq!(result.messages[0].role, "user");
+        assert_eq!(result.messages[1].role, "user");
+    }
+
+    /// #2: web_search_preview tool produces web_search_options and ServerSideTool.
+    #[test]
+    fn test_web_search_preview_tool() {
+        let input = ResponsesApiInput::Text("Search the web".to_string());
+        let req = ResponsesApiRequest {
+            tools: Some(vec![crate::models::responses::ResponsesApiTool {
+                tool_type: "web_search_preview".to_string(),
+                name: None,
+                description: None,
+                parameters: None,
+                strict: None,
+                extra: {
+                    let mut m = std::collections::HashMap::new();
+                    m.insert("search_context_size".to_string(), json!("high"));
+                    m
+                },
+            }]),
+            ..make_req("gpt-4o", input)
+        };
+        let result = responses_to_chat_completion(&req);
+
+        // Should have web_search_options
+        let wso = result.web_search_options.as_ref().unwrap();
+        assert_eq!(wso["search_context_size"], "high");
+
+        // Should have a ServerSideTool in the tools list
+        let tools = result.tools.as_ref().unwrap();
+        assert_eq!(tools.len(), 1);
+    }
+
+    /// #4: function_call_output with non-string output is normalized.
+    #[test]
+    fn test_function_call_output_non_string_in_input() {
+        let input = ResponsesApiInput::Items(vec![
+            json!({"role": "user", "content": "Run the tool"}),
+            json!({
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "my_tool",
+                "arguments": "{}"
+            }),
+            json!({
+                "type": "function_call_output",
+                "call_id": "call_1",
+                "output": {"status": "ok", "value": 42}
+            }),
+        ]);
+        let req = make_req("gpt-4o", input);
+        let result = responses_to_chat_completion(&req);
+
+        // Should have 3 messages: user, assistant (tool call), tool (result)
+        assert_eq!(result.messages.len(), 3);
+        assert_eq!(result.messages[2].role, "tool");
+        // The tool message content should be JSON-serialized
+        let content = result.messages[2].content.as_ref().unwrap();
+        assert!(content.as_str().unwrap().contains("status"));
+    }
+
+    /// #12: cache_control forwarded on content parts.
+    #[test]
+    fn test_cache_control_on_content_parts() {
+        let part = json!({
+            "type": "input_text",
+            "text": "Hello",
+            "cache_control": {"type": "ephemeral"}
+        });
+        let converted = convert_single_content_part(&part);
+        assert_eq!(converted["type"], "text");
+        assert_eq!(converted["text"], "Hello");
+        assert_eq!(converted["cache_control"]["type"], "ephemeral");
     }
 }

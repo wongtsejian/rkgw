@@ -165,6 +165,18 @@ pub struct ChatCompletionRequest {
     pub reasoning_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<serde_json::Value>,
+    /// Request metadata — arbitrary key-value pairs for tracking/debugging.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
+    /// Service tier — priority routing hint (e.g. "auto", "default").
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<String>,
+    /// Web search options — extracted from web_search_preview/web_search tools.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub web_search_options: Option<serde_json::Value>,
+    /// Context management — automatic context window management.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_management: Option<serde_json::Value>,
 }
 
 // ==================================================================================================
