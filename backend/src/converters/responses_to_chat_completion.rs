@@ -11,6 +11,23 @@ use crate::models::openai::{
 use crate::models::responses::{ResponsesApiInput, ResponsesApiRequest};
 
 // ==================================================================================================
+// Helper: extract raw base64 from a data-URI
+// ==================================================================================================
+
+/// Strip the data-URI prefix (e.g. `data:image/png;base64,`) and return the
+/// raw base64 payload.
+///
+/// If the input does not contain a comma (i.e. it is already raw base64 or
+/// empty), it is returned as-is.
+fn extract_base64_from_data_url(data_url: &str) -> &str {
+    if let Some(comma_pos) = data_url.find(',') {
+        &data_url[comma_pos + 1..]
+    } else {
+        data_url
+    }
+}
+
+// ==================================================================================================
 // Helper: map Chat Completions usage → Responses API usage
 // ==================================================================================================
 
@@ -835,6 +852,44 @@ pub fn chat_completion_to_responses_api(
         }
     }
 
+    // Add image_generation_call output items for generated images.
+    //
+    // Some providers (e.g. OpenAI DALL-E via chat completions) return generated
+    // images on the message object as an `images` array where each element has
+    // the shape: `{"image_url": {"url": "data:image/png;base64,..."}, "type": "image_url"}`.
+    //
+    // The Responses API represents each generated image as a separate
+    // `image_generation_call` output item with a base64-encoded `result` (no
+    // data-URI prefix).
+    if let Some(images) = message
+        .and_then(|m| m.get("images"))
+        .and_then(|i| i.as_array())
+    {
+        for (idx, image) in images.iter().enumerate() {
+            let image_url = image
+                .get("image_url")
+                .and_then(|iu| iu.get("url"))
+                .and_then(|u| u.as_str())
+                .unwrap_or("");
+
+            let base64_data = extract_base64_from_data_url(image_url);
+
+            if !base64_data.is_empty() {
+                let img_status = match finish_reason {
+                    "length" => "incomplete",
+                    "content_filter" => "failed",
+                    _ => "completed",
+                };
+                output.push(json!({
+                    "type": "image_generation_call",
+                    "id": format!("{}_img_{}", chat_id, idx),
+                    "status": img_status,
+                    "result": base64_data
+                }));
+            }
+        }
+    }
+
     // Build usage object with token details (H2: using shared helper).
     let usage = chat_resp.get("usage").map(map_chat_usage_to_responses);
 
@@ -945,6 +1000,9 @@ pub struct ResponsesStreamTransformer {
     message_text: String,
     /// Accumulated annotations from streaming chunks (e.g., url_citation from web search).
     accumulated_annotations: Vec<Value>,
+    /// Accumulated image generation results from streaming chunks.
+    /// Each entry is a base64-encoded image (no data-URI prefix).
+    accumulated_images: Vec<String>,
     active_function_calls: Vec<ActiveFunctionCall>,
     chunk_id: String,
     msg_id: String,
@@ -970,6 +1028,7 @@ impl ResponsesStreamTransformer {
             reasoning_text: String::new(),
             message_text: String::new(),
             accumulated_annotations: Vec::new(),
+            accumulated_images: Vec::new(),
             active_function_calls: Vec::new(),
             chunk_id: response_id.to_string(),
             msg_id: format!("msg_{}", response_id),
@@ -1243,6 +1302,58 @@ impl ResponsesStreamTransformer {
             }));
         }
 
+        // Add image_generation_call output items for accumulated images.
+        // Each image was accumulated during streaming; emit lifecycle events
+        // and add to the output array.
+        if !self.accumulated_images.is_empty() {
+            let img_start_index = msg_output_index + 1 + self.active_function_calls.len() as i32;
+            let img_status = match status {
+                "incomplete" => "incomplete",
+                _ => "completed",
+            };
+            for (idx, base64_data) in self.accumulated_images.iter().enumerate() {
+                let img_output_index = img_start_index + idx as i32;
+                let img_id = format!("{}_img_{}", &self.chunk_id, idx);
+
+                // Emit output_item.added for the image generation call.
+                events.push(format_sse_event(
+                    "response.output_item.added",
+                    &json!({
+                        "type": "response.output_item.added",
+                        "output_index": img_output_index,
+                        "item": {
+                            "type": "image_generation_call",
+                            "id": img_id,
+                            "status": "in_progress",
+                            "result": null
+                        }
+                    }),
+                ));
+
+                // Emit output_item.done for the image generation call.
+                events.push(format_sse_event(
+                    "response.output_item.done",
+                    &json!({
+                        "type": "response.output_item.done",
+                        "output_index": img_output_index,
+                        "item": {
+                            "type": "image_generation_call",
+                            "id": img_id,
+                            "status": img_status,
+                            "result": base64_data
+                        }
+                    }),
+                ));
+
+                output.push(json!({
+                    "type": "image_generation_call",
+                    "id": img_id,
+                    "status": img_status,
+                    "result": base64_data
+                }));
+            }
+        }
+
         // Build the completed response object.
         let mut completed_response = json!({
             "id": &self.resp_id,
@@ -1469,6 +1580,30 @@ impl ResponsesStreamTransformer {
                             };
                             if let Some(t) = transformed {
                                 self.accumulated_annotations.push(t);
+                            }
+                        }
+                    }
+
+                    // ── 3.6. Images (image generation) ──────────────────────────────
+                    // Accumulate generated images from streaming chunks.
+                    //
+                    // Some providers return images on the delta as:
+                    //   delta.images = [{"image_url": {"url": "data:image/png;base64,..."}, ...}]
+                    //
+                    // Each image is stored as raw base64 (no data-URI prefix) and
+                    // emitted as an `image_generation_call` output item at completion.
+                    if let Some(images) = delta.get("images").and_then(|i| i.as_array()) {
+                        for image in images {
+                            let image_url = image
+                                .get("image_url")
+                                .and_then(|iu| iu.get("url"))
+                                .and_then(|u| u.as_str())
+                                .unwrap_or("");
+
+                            let base64_data = extract_base64_from_data_url(image_url);
+
+                            if !base64_data.is_empty() {
+                                self.accumulated_images.push(base64_data.to_string());
                             }
                         }
                     }
@@ -3862,5 +3997,267 @@ mod tests {
         assert_eq!(converted["type"], "text");
         assert_eq!(converted["text"], "Hello");
         assert_eq!(converted["cache_control"]["type"], "ephemeral");
+    }
+
+    // ==============================================================================
+    // #10: Image generation output items
+    // ==============================================================================
+
+    #[test]
+    fn test_extract_base64_from_data_url() {
+        // Standard data-URI with base64 payload.
+        assert_eq!(
+            extract_base64_from_data_url("data:image/png;base64,iVBORw0KGgo="),
+            "iVBORw0KGgo="
+        );
+        // Already raw base64 (no prefix).
+        assert_eq!(extract_base64_from_data_url("iVBORw0KGgo="), "iVBORw0KGgo=");
+        // Empty string.
+        assert_eq!(extract_base64_from_data_url(""), "");
+    }
+
+    /// #10: Non-streaming response with generated images produces image_generation_call output items.
+    #[test]
+    fn test_chat_completion_to_responses_with_images() {
+        let chat_resp = json!({
+            "id": "chatcmpl-img1",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Here is the image:",
+                    "images": [
+                        {
+                            "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANS"},
+                            "type": "image_url",
+                            "index": 0
+                        }
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": 10,
+                "completion_tokens": 20,
+                "total_tokens": 30
+            }
+        });
+
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("Draw a cat".to_string()));
+        let result = chat_completion_to_responses_api(
+            &chat_resp,
+            ResponsesApiInput::Text("Draw a cat".to_string()),
+            &req,
+        );
+
+        let output = result.get("output").unwrap().as_array().unwrap();
+        // Should have: message + image_generation_call
+        assert_eq!(output.len(), 2);
+
+        // First item is the message.
+        assert_eq!(output[0]["type"], "message");
+
+        // Second item is the image_generation_call.
+        assert_eq!(output[1]["type"], "image_generation_call");
+        assert_eq!(output[1]["id"], "chatcmpl-img1_img_0");
+        assert_eq!(output[1]["status"], "completed");
+        assert_eq!(output[1]["result"], "iVBORw0KGgoAAAANS");
+    }
+
+    /// #10: Multiple generated images each produce a separate image_generation_call item.
+    #[test]
+    fn test_chat_completion_to_responses_with_multiple_images() {
+        let chat_resp = json!({
+            "id": "chatcmpl-multi",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "images": [
+                        {"image_url": {"url": "data:image/png;base64,AAAA"}, "type": "image_url", "index": 0},
+                        {"image_url": {"url": "data:image/png;base64,BBBB"}, "type": "image_url", "index": 1}
+                    ]
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        });
+
+        let req = make_req(
+            "gpt-4o",
+            ResponsesApiInput::Text("Draw two cats".to_string()),
+        );
+        let result = chat_completion_to_responses_api(
+            &chat_resp,
+            ResponsesApiInput::Text("Draw two cats".to_string()),
+            &req,
+        );
+
+        let output = result.get("output").unwrap().as_array().unwrap();
+        assert_eq!(output.len(), 3); // message + 2 images
+
+        assert_eq!(output[1]["type"], "image_generation_call");
+        assert_eq!(output[1]["result"], "AAAA");
+        assert_eq!(output[2]["type"], "image_generation_call");
+        assert_eq!(output[2]["result"], "BBBB");
+    }
+
+    /// #10: Images with finish_reason "content_filter" get status "failed".
+    #[test]
+    fn test_chat_completion_to_responses_image_content_filter() {
+        let chat_resp = json!({
+            "id": "chatcmpl-cf",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "images": [
+                        {"image_url": {"url": "data:image/png;base64,AAAA"}, "type": "image_url", "index": 0}
+                    ]
+                },
+                "finish_reason": "content_filter"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+        });
+
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("Draw".to_string()));
+        let result = chat_completion_to_responses_api(
+            &chat_resp,
+            ResponsesApiInput::Text("Draw".to_string()),
+            &req,
+        );
+
+        let output = result.get("output").unwrap().as_array().unwrap();
+        // Image should have status "failed" due to content_filter.
+        let img_item = &output[1];
+        assert_eq!(img_item["type"], "image_generation_call");
+        assert_eq!(img_item["status"], "failed");
+    }
+
+    /// #10: Streaming transformer accumulates images and emits them at completion.
+    #[test]
+    fn test_stream_image_generation_at_completion() {
+        let mut transformer = ResponsesStreamTransformer::new("resp_test", "gpt-4o");
+
+        // Chunk 1: role delta + content + image
+        let chunk1 = json!({
+            "id": "chatcmpl-img-stream",
+            "created": 1700000000,
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "role": "assistant",
+                    "content": "Here is your image:",
+                    "images": [
+                        {"image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}, "type": "image_url"}
+                    ]
+                },
+                "finish_reason": null
+            }]
+        });
+        transformer.transform_chunk(&chunk1);
+
+        // Chunk 2: finish_reason triggers completion events.
+        let chunk2 = json!({
+            "id": "chatcmpl-img-stream",
+            "created": 1700000000,
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        });
+        let events = transformer.transform_chunk(&chunk2);
+
+        // Verify that image_generation_call events were emitted.
+        let event_types: Vec<&str> = events
+            .iter()
+            .filter_map(|e| {
+                // SSE format: "event: TYPE\ndata: ..."
+                e.strip_prefix("event: ")?.split('\n').next()
+            })
+            .collect();
+
+        // Should have output_item.added and output_item.done for the image.
+        assert!(
+            event_types
+                .iter()
+                .any(|t| t == &"response.output_item.added"),
+            "Expected output_item.added event for image"
+        );
+        assert!(
+            event_types
+                .iter()
+                .any(|t| t == &"response.output_item.done"),
+            "Expected output_item.done event for image"
+        );
+        assert!(
+            event_types.iter().any(|t| t == &"response.completed"),
+            "Expected response.completed event"
+        );
+
+        // Verify the completed response contains image_generation_call in output.
+        let completed_event = events
+            .iter()
+            .find(|e| e.contains("response.completed"))
+            .unwrap();
+        let data_line = completed_event
+            .lines()
+            .find(|l| l.starts_with("data: "))
+            .unwrap();
+        let data: Value = serde_json::from_str(&data_line[6..]).unwrap();
+        let output = data["response"]["output"].as_array().unwrap();
+
+        let img_items: Vec<&Value> = output
+            .iter()
+            .filter(|o| o["type"] == "image_generation_call")
+            .collect();
+        assert_eq!(img_items.len(), 1);
+        assert_eq!(img_items[0]["result"], "iVBORw0KGgo=");
+        assert_eq!(img_items[0]["status"], "completed");
+    }
+
+    /// #10: Response without images should not produce any image_generation_call items.
+    #[test]
+    fn test_chat_completion_to_responses_no_images() {
+        let chat_resp = json!({
+            "id": "chatcmpl-noimg",
+            "object": "chat.completion",
+            "created": 1700000000,
+            "model": "gpt-4o",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "No images here"
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}
+        });
+
+        let req = make_req("gpt-4o", ResponsesApiInput::Text("Hello".to_string()));
+        let result = chat_completion_to_responses_api(
+            &chat_resp,
+            ResponsesApiInput::Text("Hello".to_string()),
+            &req,
+        );
+
+        let output = result.get("output").unwrap().as_array().unwrap();
+        // Only the message, no image_generation_call items.
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0]["type"], "message");
     }
 }
