@@ -44,9 +44,22 @@ impl HuaweiMaasProvider {
         format!("{}/chat/completions", self.base_url(ctx))
     }
 
-    /// Strip image_url parts from content arrays — Huawei MaaS does not
-    /// support vision. Injects a notice so the model can acknowledge the gap.
+    /// Strip unsupported fields from the request body before sending to
+    /// Huawei MaaS:
+    /// - `tools`, `tool_choice`, `parallel_tool_calls`, `functions` — MaaS does
+    ///   not support tool/function calling and returns a 400 validation error.
+    /// - `image_url` content parts — MaaS does not support vision.
     fn normalize_request_body(body: &mut Value) {
+        // Huawei MaaS does not support tool/function calling — strip these fields
+        // to avoid 400 "request param validation error, 'function'" responses.
+        if let Some(map) = body.as_object_mut() {
+            map.remove("tools");
+            map.remove("tool_choice");
+            map.remove("parallel_tool_calls");
+            map.remove("functions"); // legacy OpenAI function-calling field
+        }
+
+        // Huawei MaaS does not support vision — strip image_url content parts.
         let Some(messages) = body.get_mut("messages").and_then(|m| m.as_array_mut()) else {
             return;
         };
@@ -78,6 +91,28 @@ impl HuaweiMaasProvider {
         let url = self.completions_url(ctx);
         body["stream"] = json!(stream);
         Self::normalize_request_body(&mut body);
+
+        tracing::debug!(
+            model = %ctx.model,
+            stream,
+            body_keys = ?body.as_object().map(|o| o.keys().collect::<Vec<_>>()),
+            "Huawei MaaS outgoing request body keys"
+        );
+
+        if ctx.debug_mode_enabled {
+            match serde_json::to_string_pretty(&body) {
+                Ok(request_body) => tracing::debug!(
+                    model = %ctx.model,
+                    stream,
+                    request_body = %request_body,
+                    "Huawei MaaS outgoing request body"
+                ),
+                Err(error) => tracing::warn!(
+                    error = %error,
+                    "Failed to serialize Huawei MaaS outgoing request body for debug logging"
+                ),
+            }
+        }
 
         let client = if stream {
             &self.streaming_client
@@ -246,6 +281,7 @@ mod tests {
         let ctx = ProviderContext {
             credentials: &creds,
             model: &model,
+            debug_mode_enabled: false,
         };
         assert_eq!(
             provider.completions_url(&ctx),
@@ -266,6 +302,7 @@ mod tests {
         let ctx = ProviderContext {
             credentials: &creds,
             model: &model,
+            debug_mode_enabled: false,
         };
         assert_eq!(
             provider.completions_url(&ctx),
@@ -499,5 +536,34 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("does not support vision"));
+    }
+
+    #[test]
+    fn test_normalize_request_body_strips_tool_fields() {
+        let mut body = json!({
+            "model": "deepseek-v3",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "function", "function": {"name": "read_file", "parameters": {}}}],
+            "tool_choice": "auto",
+            "parallel_tool_calls": true
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        assert!(body.get("tools").is_none());
+        assert!(body.get("tool_choice").is_none());
+        assert!(body.get("parallel_tool_calls").is_none());
+        // messages and model remain intact
+        assert_eq!(body["model"], "deepseek-v3");
+        assert_eq!(body["messages"][0]["content"], "hi");
+    }
+
+    #[test]
+    fn test_normalize_request_body_strips_legacy_functions_field() {
+        let mut body = json!({
+            "model": "deepseek-v3",
+            "messages": [{"role": "user", "content": "hi"}],
+            "functions": [{"name": "get_weather", "parameters": {}}]
+        });
+        HuaweiMaasProvider::normalize_request_body(&mut body);
+        assert!(body.get("functions").is_none());
     }
 }
