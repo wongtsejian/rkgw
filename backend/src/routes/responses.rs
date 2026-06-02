@@ -6,6 +6,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 
+use crate::config::DebugMode;
 use crate::converters::responses_to_chat_completion::{
     chat_completion_to_responses_api, responses_to_chat_completion, ResponsesStreamTransformer,
 };
@@ -135,6 +136,7 @@ pub(crate) async fn responses_handler(
 
     // ── Provider dispatch with failover ──────────────────────────────
     const MAX_ATTEMPTS: usize = 3;
+    let debug_mode_enabled = !matches!(config.debug_mode, DebugMode::Off);
 
     if is_stream {
         let model_for_transform = chat_req.model.clone();
@@ -145,6 +147,7 @@ pub(crate) async fn responses_handler(
             let ctx = ProviderContext {
                 credentials: &creds,
                 model: &chat_req.model,
+                debug_mode_enabled,
             };
 
             match provider.stream_openai(&ctx, &chat_req).await {
@@ -241,6 +244,7 @@ pub(crate) async fn responses_handler(
             let ctx = ProviderContext {
                 credentials: &creds,
                 model: &chat_req.model,
+                debug_mode_enabled,
             };
 
             match provider.execute_openai(&ctx, &chat_req).await {

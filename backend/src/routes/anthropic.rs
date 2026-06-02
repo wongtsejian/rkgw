@@ -6,6 +6,7 @@ use axum::{
 };
 use futures::stream::StreamExt;
 
+use crate::config::DebugMode;
 use crate::error::ApiError;
 use crate::middleware::DEBUG_LOGGER;
 use crate::models::anthropic::AnthropicMessagesRequest;
@@ -145,6 +146,7 @@ pub(crate) async fn anthropic_messages_handler(
 
     // ── Provider dispatch with failover ──────────────────────────────
     const MAX_ATTEMPTS: usize = 3;
+    let debug_mode_enabled = !matches!(config.debug_mode, DebugMode::Off);
 
     if request.stream {
         let mut last_error = None;
@@ -152,6 +154,7 @@ pub(crate) async fn anthropic_messages_handler(
             let ctx = ProviderContext {
                 credentials: &creds,
                 model: &request.model,
+                debug_mode_enabled,
             };
 
             match provider.stream_anthropic(&ctx, &request).await {
@@ -223,6 +226,7 @@ pub(crate) async fn anthropic_messages_handler(
             let ctx = ProviderContext {
                 credentials: &creds,
                 model: &request.model,
+                debug_mode_enabled,
             };
 
             match provider.execute_anthropic(&ctx, &request).await {

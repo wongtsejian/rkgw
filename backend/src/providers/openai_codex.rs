@@ -298,6 +298,7 @@ mod tests {
         let ctx = ProviderContext {
             credentials: &creds,
             model: &model,
+            debug_mode_enabled: false,
         };
         assert_eq!(
             provider.completions_url(&ctx),
@@ -318,6 +319,7 @@ mod tests {
         let ctx = ProviderContext {
             credentials: &creds,
             model: &model,
+            debug_mode_enabled: false,
         };
         assert_eq!(
             provider.completions_url(&ctx),

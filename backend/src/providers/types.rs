@@ -123,6 +123,7 @@ pub struct ProviderCredentials {
 pub struct ProviderContext<'a> {
     pub credentials: &'a ProviderCredentials,
     pub model: &'a str,
+    pub debug_mode_enabled: bool,
 }
 
 /// Non-streaming response from a provider API.
